@@ -1,0 +1,200 @@
+@import 'tailwindcss';
+@import '@xterm/xterm/css/xterm.css';
+
+/*
+ * Instrument-panel palette, in two themes.
+ *
+ * The dark palette is the @theme default; the light one re-declares the very
+ * same `--color-*` names under `[data-theme='light']`. Declaring the literals in
+ * each block (rather than pointing the tokens at a second layer of variables) is
+ * what makes the switch work at all: a custom property that reads `var(--x)` is
+ * substituted where it is *declared*, so an indirection declared once on :root
+ * would freeze at whatever the root theme was. This way any element carrying the
+ * attribute themes its own subtree, and setting it on <html> themes the app.
+ *
+ * The names stay dark-first — shell-950 is the chrome, shell-850 a panel
+ * surface, ink-100 the strongest text — and light re-points each to the
+ * equivalent role rather than inverting the scale.
+ */
+@theme {
+  --color-shell-950: #070a10;
+  --color-shell-900: #0b0f16;
+  --color-shell-850: #10151f;
+  --color-shell-800: #151b26;
+  --color-shell-700: #1e2634;
+  --color-shell-600: #2b3546;
+  --color-shell-500: #3d4859;
+
+  --color-ink-100: #eef2f8;
+  --color-ink-300: #b9c3d3;
+  --color-ink-500: #7d8798;
+  --color-ink-600: #5d6675;
+
+  --color-accent-400: #4cc4ff;
+  --color-accent-500: #1fa8e8;
+  --color-accent-600: #1385bd;
+
+  --color-live-400: #46e0a8;
+  --color-live-600: #12a172;
+  --color-warn-400: #ffc773;
+  --color-warn-600: #c2801d;
+  --color-danger-400: #ff8090;
+  --color-danger-600: #cf3b52;
+
+  /*
+   * Surface for the two "media" areas — the arm render and the console. It is a
+   * token of its own because both want a shade that reads as a viewport rather
+   * than a panel, but it follows the theme like everything else.
+   */
+  --color-plate: #070a10;
+
+  --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+}
+
+:root,
+[data-theme='dark'] {
+  color-scheme: dark;
+}
+
+[data-theme='light'] {
+  color-scheme: light;
+
+  --color-shell-950: #ffffff;
+  --color-shell-900: #eef1f6;
+  --color-shell-850: #ffffff;
+  --color-shell-800: #f3f5f9;
+  --color-shell-700: #dbe1ea;
+  --color-shell-600: #c2cad8;
+  --color-shell-500: #9aa5b6;
+
+  --color-ink-100: #0e141d;
+  --color-ink-300: #38424f;
+  --color-ink-500: #646e7d;
+  --color-ink-600: #8a94a3;
+
+  --color-accent-400: #0a72a8;
+  --color-accent-500: #1590d0;
+  --color-accent-600: #0f7cb4;
+
+  --color-live-400: #0a8f60;
+  --color-live-600: #12a172;
+  --color-warn-400: #96620a;
+  --color-warn-600: #c2801d;
+  --color-danger-400: #c0293e;
+  --color-danger-600: #cf3b52;
+
+  --color-plate: #f2f5f9;
+}
+
+/* A dark subtree inside a light one has to restate the defaults. */
+[data-theme='dark'] {
+  --color-shell-950: #070a10;
+  --color-shell-900: #0b0f16;
+  --color-shell-850: #10151f;
+  --color-shell-800: #151b26;
+  --color-shell-700: #1e2634;
+  --color-shell-600: #2b3546;
+  --color-shell-500: #3d4859;
+
+  --color-ink-100: #eef2f8;
+  --color-ink-300: #b9c3d3;
+  --color-ink-500: #7d8798;
+  --color-ink-600: #5d6675;
+
+  --color-accent-400: #4cc4ff;
+  --color-accent-500: #1fa8e8;
+  --color-accent-600: #1385bd;
+
+  --color-live-400: #46e0a8;
+  --color-live-600: #12a172;
+  --color-warn-400: #ffc773;
+  --color-warn-600: #c2801d;
+  --color-danger-400: #ff8090;
+  --color-danger-600: #cf3b52;
+
+  --color-plate: #070a10;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-shell-900);
+  color: var(--color-ink-100);
+  font-family:
+    ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+/* Consistent, unobtrusive scrollbars throughout. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-shell-600) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--color-shell-600);
+  border-radius: 6px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--color-shell-500);
+  background-clip: content-box;
+}
+
+/* Numeric fields read better without spinners in a dense form. */
+input[type='number']::-webkit-inner-spin-button,
+input[type='number']::-webkit-outer-spin-button {
+  appearance: none;
+  margin: 0;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-accent-500);
+  outline-offset: 1px;
+}
+
+/* The macOS inset title bar needs a draggable strip. */
+.drag-region {
+  -webkit-app-region: drag;
+}
+.no-drag {
+  -webkit-app-region: no-drag;
+}
+
+/*
+ * Wordmark pair: show the export that reads against the current ground. Driven by
+ * the same `data-theme` attribute as the colour tokens, so a mark inside a themed
+ * subtree gets it right without the component knowing where it sits.
+ */
+.logo-on-light {
+  display: none;
+}
+[data-theme='light'] .logo-on-dark {
+  display: none;
+}
+[data-theme='light'] .logo-on-light {
+  display: block;
+}
+
+/*
+ * The follower render is a near-white arm on transparency: on the light plate it
+ * needs an edge to sit on, where the dark plate gave it one for free.
+ */
+[data-theme='light'] .arm-render {
+  filter: drop-shadow(0 1px 2px rgb(14 20 29 / 0.35));
+}
+
+.xterm .xterm-viewport {
+  background-color: transparent !important;
+}

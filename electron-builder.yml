@@ -1,0 +1,75 @@
+appId: com.rebeldot.lerobotgui
+productName: LeRobot Control
+copyright: Copyright © 2026 RebelDot
+directories:
+  buildResources: build
+  output: dist
+
+# The default is "package everything in the project", so this list is all
+# exclusions. The renderer, preload and main bundles in out/ are what actually
+# runs; the source they were built from, the tests, the tooling and the local
+# state are dead weight inside an installer — and env/ is a 1.5 GB Python
+# environment that must never be shipped.
+files:
+  - '!src/**/*'
+  - '!tests/**/*'
+  - '!tools/**/*'
+  - '!scripts/**/*'
+  - '!.github/**/*'
+  - '!.vscode/**/*'
+  - '!build/**/*'
+  - '!env/**/*'
+  - '!venv/**/*'
+  - '!.venv/**/*'
+  - '!calibration/**/*'
+  - '!samples/**/*'
+  # Shipped through extraResources instead, so they are not also duplicated
+  # inside the asar.
+  - '!assets/**/*'
+  - '!resources/**/*'
+  - '!electron.vite.config.{js,ts,mjs,cjs}'
+  - '!vitest.config.{js,ts,mjs,cjs}'
+  - '!electron-builder.yml'
+  - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
+  - '!*.tsbuildinfo'
+  - '!{PROJECT_DESCRIPTION.md,CLAUDE.md,README.md}'
+  # LICENSE and NOTICE are kept: they cover material that ships inside the app.
+
+# node-pty's native binding has to be dlopen'd from a real path, so it cannot
+# live inside the asar.
+asarUnpack:
+  - node_modules/node-pty/**
+
+# The Python bridge is spawned as a file, and the assets are fetched over the
+# app's `arm://` scheme; both resolve through `process.resourcesPath` when
+# packaged (see src/main/paths.ts).
+extraResources:
+  - from: resources/bridge
+    to: bridge
+  - from: assets
+    to: assets
+
+mac:
+  target: [dmg, zip]
+  category: public.app-category.developer-tools
+  # Unsigned builds work for local use; macOS will warn on first launch. Set
+  # CSC_IDENTITY_AUTO_DISCOVERY=false to skip signing deliberately, or provide
+  # CSC_LINK / CSC_KEY_PASSWORD to sign. See README.md.
+  extendInfo:
+    NSCameraUsageDescription: LeRobot Control lists and previews connected cameras so you can pick one for teleoperation and recording.
+    NSMicrophoneUsageDescription: Not used. Present only because camera capture APIs may request it.
+
+win:
+  target: [nsis]
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  license: LICENSE
+
+linux:
+  target: [AppImage, deb]
+  category: Development
+  # `deb` refuses to build without a maintainer.
+  maintainer: RebelDot <andrei.brumboiu@rebeldot.com>
+  synopsis: GUI for setting up and operating LeRobot SO-100 / SO-101 arms

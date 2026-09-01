@@ -1,0 +1,71 @@
+# Builds installers for all three platforms.
+#
+# Cross-compiling is not practical here: node-pty is a native module and has to
+# be rebuilt against Electron for the target, and the macOS and Windows
+# installers want their own toolchains. So each platform builds on its own
+# runner, which is also the only way to get a signed macOS build later.
+#
+# Run it from the Actions tab, or push a v* tag to attach the artifacts.
+name: build
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: dist:mac
+          - os: windows-latest
+            target: dist:win
+          - os: ubuntu-latest
+            target: dist:linux
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # Electron needs a display to open a window, which `npm run smoke` does.
+      - name: Install Xvfb
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+
+      # `postinstall` rebuilds node-pty against this runner's Electron.
+      - run: npm ci
+
+      - name: Verify
+        run: npm run verify
+        if: runner.os != 'Linux'
+
+      - name: Verify (Linux)
+        run: xvfb-run -a npm run verify
+        if: runner.os == 'Linux'
+
+      # Unsigned builds. To sign, add the secrets electron-builder documents
+      # (CSC_LINK / CSC_KEY_PASSWORD, and APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD
+      # / APPLE_TEAM_ID for notarization) and drop this env block.
+      - name: Package
+        run: npm run ${{ matrix.target }}
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installers-${{ matrix.os }}
+          path: |
+            dist/*.dmg
+            dist/*.zip
+            dist/*.exe
+            dist/*.AppImage
+            dist/*.deb
+          if-no-files-found: error

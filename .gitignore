@@ -1,0 +1,40 @@
+# Dependencies and build output
+node_modules/
+out/
+dist/
+*.tsbuildinfo
+
+# The Python environment the app creates. It is 1.5 GB of platform-specific
+# binaries and is rebuilt from Settings on any machine, so it never belongs in
+# the repository — see the Quick start in README.md.
+env/
+venv/
+.venv/
+
+# Python bytecode from the bridge sidecar
+__pycache__/
+*.py[cod]
+
+# Local runtime state: real calibration files describe a particular arm, and
+# recorded datasets are large.
+calibration/*.json
+samples/*
+!samples/.gitkeep
+!calibration/.gitkeep
+
+# Blender's optional working file (`build:sim --save-blend`) and its backups.
+# The built scenes it exports are committed; the .blend is not.
+assets/simulation/generated/*.blend
+*.blend1
+
+# Editors and OS
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+
+# Logs and scratch
+*.log
+npm-debug.log*
+preview-tmp/

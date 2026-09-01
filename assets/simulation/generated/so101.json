@@ -1,0 +1,124 @@
+{
+  "model": "SO101",
+  "robot": "so101_new_calib",
+  "urdf": "assets/simulation/SO101/so101_new_calib.urdf",
+  "glb": "simulation/generated/so101.glb",
+  "generator": "tools/blender/build_sim_scene.py on Blender 5.1.1",
+  "generatedAt": "2026-09-01T19:59:24+00:00",
+  "rootNode": "robot__so101_new_calib",
+  "groundNode": "ground",
+  "triangles": 60443,
+  "joints": [
+    {
+      "name": "shoulder_pan",
+      "node": "joint__shoulder_pan",
+      "axis": [
+        0.0,
+        1.0,
+        -0.0
+      ],
+      "lower": -1.91986,
+      "upper": 1.91986,
+      "rest": 0.0
+    },
+    {
+      "name": "shoulder_lift",
+      "node": "joint__shoulder_lift",
+      "axis": [
+        0.0,
+        1.0,
+        -0.0
+      ],
+      "lower": -1.74533,
+      "upper": 1.74533,
+      "rest": 0.0
+    },
+    {
+      "name": "elbow_flex",
+      "node": "joint__elbow_flex",
+      "axis": [
+        0.0,
+        1.0,
+        -0.0
+      ],
+      "lower": -1.69,
+      "upper": 1.69,
+      "rest": 0.0
+    },
+    {
+      "name": "wrist_flex",
+      "node": "joint__wrist_flex",
+      "axis": [
+        0.0,
+        1.0,
+        -0.0
+      ],
+      "lower": -1.65806,
+      "upper": 1.65806,
+      "rest": 0.0
+    },
+    {
+      "name": "wrist_roll",
+      "node": "joint__wrist_roll",
+      "axis": [
+        0.0,
+        1.0,
+        -0.0
+      ],
+      "lower": -2.74385,
+      "upper": 2.84121,
+      "rest": 0.0
+    },
+    {
+      "name": "gripper",
+      "node": "joint__gripper",
+      "axis": [
+        0.0,
+        1.0,
+        -0.0
+      ],
+      "lower": -0.174533,
+      "upper": 1.74533,
+      "rest": 0.785398
+    }
+  ],
+  "ground": {
+    "light": "#c9ced6",
+    "dark": "#2c333e",
+    "size": 1.1
+  },
+  "lighting": {
+    "ambient": {
+      "color": "#ffffff",
+      "intensity": 0.8
+    },
+    "hemisphere": {
+      "sky": "#eaf2ff",
+      "ground": "#4a4a52",
+      "intensity": 0.6
+    },
+    "key": {
+      "color": "#fff6e8",
+      "intensity": 1.4,
+      "direction": [
+        -0.45,
+        -1.0,
+        -0.55
+      ]
+    }
+  },
+  "camera": {
+    "position": [
+      0.72167,
+      0.5583,
+      0.9237
+    ],
+    "target": [
+      0.0,
+      0.13166,
+      -0.0
+    ],
+    "fov": 38.0,
+    "radius": 0.31816
+  }
+}

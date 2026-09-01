@@ -1,0 +1,124 @@
+{
+  "model": "SO100",
+  "robot": "so_arm100",
+  "urdf": "assets/simulation/SO100/so100.urdf",
+  "glb": "simulation/generated/so100.glb",
+  "generator": "tools/blender/build_sim_scene.py on Blender 5.1.1",
+  "generatedAt": "2026-09-01T19:59:23+00:00",
+  "rootNode": "robot__so_arm100",
+  "groundNode": "ground",
+  "triangles": 50674,
+  "joints": [
+    {
+      "name": "shoulder_pan",
+      "node": "joint__shoulder_pan",
+      "axis": [
+        0.0,
+        0.0,
+        -1.0
+      ],
+      "lower": -2.0,
+      "upper": 2.0,
+      "rest": 0.0
+    },
+    {
+      "name": "shoulder_lift",
+      "node": "joint__shoulder_lift",
+      "axis": [
+        1.0,
+        0.0,
+        -0.0
+      ],
+      "lower": 0.0,
+      "upper": 3.5,
+      "rest": 1.75
+    },
+    {
+      "name": "elbow_flex",
+      "node": "joint__elbow_flex",
+      "axis": [
+        1.0,
+        0.0,
+        -0.0
+      ],
+      "lower": -3.14158,
+      "upper": 0.0,
+      "rest": -1.57079
+    },
+    {
+      "name": "wrist_flex",
+      "node": "joint__wrist_flex",
+      "axis": [
+        1.0,
+        0.0,
+        -0.0
+      ],
+      "lower": -2.5,
+      "upper": 1.2,
+      "rest": -0.65
+    },
+    {
+      "name": "wrist_roll",
+      "node": "joint__wrist_roll",
+      "axis": [
+        0.0,
+        0.0,
+        -1.0
+      ],
+      "lower": -3.14158,
+      "upper": 3.14158,
+      "rest": 0.0
+    },
+    {
+      "name": "gripper",
+      "node": "joint__gripper",
+      "axis": [
+        0.0,
+        1.0,
+        -0.0
+      ],
+      "lower": -0.2,
+      "upper": 2.0,
+      "rest": 0.9
+    }
+  ],
+  "ground": {
+    "light": "#c9ced6",
+    "dark": "#2c333e",
+    "size": 1.1
+  },
+  "lighting": {
+    "ambient": {
+      "color": "#ffffff",
+      "intensity": 0.8
+    },
+    "hemisphere": {
+      "sky": "#eaf2ff",
+      "ground": "#4a4a52",
+      "intensity": 0.6
+    },
+    "key": {
+      "color": "#fff6e8",
+      "intensity": 1.4,
+      "direction": [
+        -0.45,
+        -1.0,
+        -0.55
+      ]
+    }
+  },
+  "camera": {
+    "position": [
+      0.47152,
+      0.36651,
+      0.60352
+    ],
+    "target": [
+      0.0,
+      0.08775,
+      -0.0
+    ],
+    "fov": 38.0,
+    "radius": 0.20788
+  }
+}

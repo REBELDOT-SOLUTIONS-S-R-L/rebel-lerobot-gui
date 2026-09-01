@@ -1,0 +1,18 @@
+LeRobot Control
+Copyright (c) 2026 RebelDot — Physical AI department
+
+The MIT licence in LICENSE covers this project's own source. Material that came
+from elsewhere keeps its own terms:
+
+- assets/simulation/ — the SO-100 and SO-101 URDFs, STL meshes and MuJoCo
+  descriptions are from TheRobotStudio's SO-ARM100 repository
+  (https://github.com/TheRobotStudio/SO-ARM100). Check that repository for its
+  licence before redistributing them.
+
+- LeRobot (https://github.com/huggingface/lerobot), Apache License 2.0, is what
+  actually drives the arms. It is not bundled here: the app installs it into a
+  Python environment you choose, and shells out to its CLI.
+
+- assets/logo/ — the RebelDot wordmarks are trademarks of RebelDot. The MIT
+  licence covers the code, not the brand: replace them with your own before
+  publishing a modified build.
