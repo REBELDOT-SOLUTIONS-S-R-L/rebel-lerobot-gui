@@ -178,6 +178,14 @@ export interface BusSnapshot {
   motors: MotorState[]
   /** Populated when source === 'calibration-file'. */
   calibrationPath?: string
+  /**
+   * The readings come from the app's own simulation — the virtual arm.
+   *
+   * Still `source: 'live'`, because everything that is true of a connected arm
+   * is true of it: the positions move, the limits can be written and the torque
+   * can be switched. This only changes how the panels describe it.
+   */
+  simulated?: boolean
   warning?: string
 }
 
@@ -387,7 +395,27 @@ export interface CommandSpec {
   display: string
 }
 
+/**
+ * What drives the follower.
+ *
+ * `leader` is LeRobot's own arrangement — a second arm, joint for joint, run by
+ * `lerobot-teleoperate`. The other two have no pose to copy, so they command the
+ * tool and the app solves inverse kinematics for the joints itself; see
+ * `@shared/teleop-input`.
+ */
+export type TeleopController = 'leader' | 'keyboard' | 'gamepad'
+
+/**
+ * The two that command the tool rather than copying a pose.
+ *
+ * A leader arm is a whole session — a second arm on its own port, with its own
+ * calibration — which is why only these two are offered from panels that are
+ * showing one arm.
+ */
+export type EeController = Exclude<TeleopController, 'leader'>
+
 export interface TeleoperateOptions {
+  controller: TeleopController
   setup: 'single' | 'dual'
   /** Single setup. */
   robotUid: string | null
@@ -433,6 +461,25 @@ export interface InferOptions {
   /** Only used on the lerobot-record fallback path. */
   evalRepoId: string
   evalDatasetRoot: string
+}
+
+/**
+ * One episode's recorded actions, for a replay the app performs itself.
+ *
+ * `lerobot-replay` cannot drive the virtual arm — there is no LeRobot device
+ * behind it — so the app steps through the episode and writes the goals. Read
+ * through `LeRobotDataset`, which is also what `lerobot-replay` uses, so any
+ * dataset layout it can open works here too.
+ */
+export interface EpisodeActions {
+  /** Action feature names, e.g. `shoulder_pan.pos`, in column order. */
+  columns: string[]
+  /** One row per frame, in normalized units — degrees, or percent for the jaws. */
+  frames: number[][]
+  fps: number
+  /** Frames the episode has, which may exceed the rows returned. */
+  totalFrames: number
+  truncated: boolean
 }
 
 export interface DatasetMeta {

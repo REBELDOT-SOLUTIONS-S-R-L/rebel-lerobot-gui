@@ -1,4 +1,6 @@
 import type { ArmModel, DeviceRole } from '@shared/devices'
+import { readingsFromMotors } from '@shared/sim'
+import { isVirtual } from '@shared/virtual'
 import { autoCalBody, autoCalSummary, autoCalTitle, autoCalTone } from '@shared/autocal'
 import { motionBody, motionTitle, motionTone } from '@shared/motion'
 import type {
@@ -9,6 +11,7 @@ import type {
   RunInfo
 } from '@shared/types'
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { ArmControlButton, ArmControlFields } from '../components/ArmControl'
 import { ArmDiagram } from '../components/ArmDiagram'
 import { ConsolePane } from '../components/ConsolePane'
 import { MotorEditor } from '../components/MotorEditor'
@@ -28,11 +31,22 @@ import {
   TextInput
 } from '../components/ui'
 import { api } from '../lib/api'
+import { useArmControl } from '../lib/use-arm-control'
+import { useSticky } from '../lib/use-sticky'
 import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '../store/useAppStore'
 
 /** Seconds of warning before a motion test starts driving the arm. */
 const MOTION_COUNTDOWN_S = 5
+
+/**
+ * Position stream rate for the simulated arm.
+ *
+ * Faster than the 10 Hz a real bus is polled at, because it costs nothing —
+ * the simulation is in the same process — and because the diagram has to keep up
+ * with an arm being flown from this screen rather than merely watched.
+ */
+const SIM_STREAM_HZ = 30
 
 /**
  * Configure: the arm view with motor indicators, plus the device profile that
@@ -64,14 +78,17 @@ export function ConfigurePanel(): ReactNode {
       setActiveRun: s.setActiveRun
     })))
 
-  const [selectedUid, setSelectedUid] = useState<string | null>(null)
+  // Which device and which motor survive a tab switch; the live snapshot behind
+  // them does not, and is re-read on the way back in.
+  const [selectedUid, setSelectedUid] = useSticky('configure.device', () => null)
+  const [selectedMotor, setSelectedMotor] = useSticky('configure.motor', () => null)
   const [draft, setDraft] = useState<DeviceProfile | null>(null)
   const [snapshot, setSnapshot] = useState<BusSnapshot | null>(null)
-  const [selectedMotor, setSelectedMotor] = useState<string | null>(null)
   const [connecting, setConnecting] = useState(false)
   const [streaming, setStreaming] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
+  const [actionNotice, setActionNotice] = useState<string | null>(null)
   const [scanResult, setScanResult] = useState<string | null>(null)
   const [scanning, setScanning] = useState(false)
   const [torqueOn, setTorqueOn] = useState(false)
@@ -85,20 +102,28 @@ export function ConfigurePanel(): ReactNode {
     [runs, activeRunId]
   )
   const envReady = !!caps?.ok
+  /** The virtual arm: no port, no environment, and nothing to calibrate. */
+  const simulated = isVirtual(draft?.uid)
 
-  // Keep the draft in sync with the selected profile.
+  // Keep the draft in sync with the selected profile. The motor selection is
+  // left alone: every arm has the same six, so the one being inspected still
+  // means something after a tab switch or a profile edit.
   useEffect(() => {
     const profile = profiles.find((p) => p.uid === selectedUid) ?? null
     setDraft(profile ? { ...profile } : null)
     setSnapshot(null)
-    setSelectedMotor(null)
     setStreaming(false)
   }, [selectedUid, profiles])
 
-  // Select the first profile once they load.
+  // Select something once the profiles load, and take the first one back if the
+  // remembered selection no longer names a device — this survives a tab switch,
+  // so it can outlive the profile it points at.
   useEffect(() => {
-    if (!selectedUid && profiles.length > 0) setSelectedUid(profiles[0].uid)
-  }, [profiles, selectedUid])
+    if (profiles.length === 0) return
+    if (!selectedUid || !profiles.some((p) => p.uid === selectedUid)) {
+      setSelectedUid(profiles[0].uid)
+    }
+  }, [profiles, selectedUid, setSelectedUid])
 
   /* -- live position stream ----------------------------------------- */
 
@@ -176,13 +201,17 @@ export function ConfigurePanel(): ReactNode {
     if (!draft) return
     setSavingCal(true)
     setActionError(null)
-    const read = await api.calibration.readFromMotors()
+    setActionNotice(null)
+    const read = await api.calibration.readFromMotors(draft.uid)
     if (!read.ok) {
       setActionError(read.error)
     } else {
       const written = await api.calibration.write(draft.uid, read.value)
       if (!written.ok) setActionError(written.error)
-      else setAutocal(null)
+      else {
+        setAutocal(null)
+        setActionNotice(`Calibration written to ${written.value}.`)
+      }
     }
     setSavingCal(false)
     await refreshSnapshot()
@@ -205,6 +234,12 @@ export function ConfigurePanel(): ReactNode {
     if (!res.ok) setActionError(res.error)
   }, [])
 
+  // The simulation holds its commanded pose from the moment it starts, so the
+  // torque toggle has to open in the right state rather than assuming off.
+  useEffect(() => {
+    if (snapshot?.simulated) setTorqueOn(true)
+  }, [snapshot?.simulated])
+
   // Nothing should be driving the arm once this panel is gone.
   useEffect(() => {
     return () => {
@@ -213,13 +248,15 @@ export function ConfigurePanel(): ReactNode {
     }
   }, [])
 
-  // Stop the stream and release the bus when leaving the panel.
+  // Stop the stream and release the bus when leaving the panel — or when the
+  // selection moves to another device, which is the same obligation.
   useEffect(() => {
+    const uid = draft?.uid
     return () => {
-      void api.bus.streamStop()
-      void api.bus.disconnect()
+      void api.bus.streamStop(uid)
+      void api.bus.disconnect(uid)
     }
-  }, [])
+  }, [draft?.uid])
 
   /* -- actions ------------------------------------------------------ */
 
@@ -231,7 +268,7 @@ export function ConfigurePanel(): ReactNode {
     if (res.ok) {
       setSnapshot(res.value)
       if (res.value.source === 'live') {
-        const started = await api.bus.streamStart(10)
+        const started = await api.bus.streamStart(draft.uid, 10)
         setStreaming(started.ok)
       } else {
         setStreaming(false)
@@ -256,9 +293,30 @@ export function ConfigurePanel(): ReactNode {
     if (draft && !snapshot) void loadOffline()
   }, [draft, snapshot, loadOffline])
 
+  /**
+   * The simulation has nothing to connect to, so it just runs.
+   *
+   * Selecting it is the whole handshake: `bus:offlineSnapshot` already returns
+   * its live state, and this starts the position stream that animates the
+   * diagram. There is no CONNECT button for it, and none needed.
+   */
+  useEffect(() => {
+    const uid = draft?.uid
+    if (!simulated || !uid) return
+    let cancelled = false
+    void api.bus.streamStart(uid, SIM_STREAM_HZ).then((res) => {
+      if (!cancelled) setStreaming(res.ok)
+    })
+    return () => {
+      cancelled = true
+      void api.bus.streamStop(uid)
+    }
+  }, [simulated, draft?.uid])
+
   const disconnect = async (): Promise<void> => {
-    await api.bus.streamStop()
-    await api.bus.disconnect()
+    if (!draft) return
+    await api.bus.streamStop(draft.uid)
+    await api.bus.disconnect(draft.uid)
     setStreaming(false)
     await loadOffline()
   }
@@ -329,6 +387,21 @@ export function ConfigurePanel(): ReactNode {
     if (run?.kind === 'calibrate' && run.status === 'exited') void loadOffline()
   }, [run?.kind, run?.status, loadOffline])
 
+  /**
+   * Flying the arm from this screen.
+   *
+   * Offered for the simulated arm only: a real one is driven from Teleoperate,
+   * where its torque and its leader are set up deliberately, whereas the
+   * simulation is already open the moment it is selected.
+   */
+  const control = useArmControl({
+    uid: draft?.uid ?? null,
+    model: draft?.model ?? null,
+    available: simulated && snapshot?.source === 'live',
+    readings: useMemo(() => readingsFromMotors(snapshot?.motors ?? []), [snapshot]),
+    panel: 'configure'
+  })
+
   const motor = snapshot?.motors.find((m) => m.name === selectedMotor) ?? null
   const calibrationPath = draft ? `${draft.calibrationDir}/${draft.id}.json`.replace(/\/+/g, '/') : ''
 
@@ -347,16 +420,18 @@ export function ConfigurePanel(): ReactNode {
           title={draft ? `${draft.id} — ${draft.model} ${draft.role === 'robot' ? 'follower' : 'leader'}` : 'Arm view'}
           description={
             snapshot
-              ? snapshot.source === 'live'
-                ? `Live from ${snapshot.port}${snapshot.baudrate ? ` at ${snapshot.baudrate} baud` : ''}`
-                : snapshot.source === 'calibration-file'
-                  ? `From the calibration file — connect the arm for live positions`
-                  : 'Factory defaults — this device has not been calibrated yet'
+              ? snapshot.simulated
+                ? 'Simulated in the app — the joints move, but no hardware is involved'
+                : snapshot.source === 'live'
+                  ? `Live from ${snapshot.port}${snapshot.baudrate ? ` at ${snapshot.baudrate} baud` : ''}`
+                  : snapshot.source === 'calibration-file'
+                    ? `From the calibration file — connect the arm for live positions`
+                    : 'Factory defaults — this device has not been calibrated yet'
               : 'Select or create a device to begin'
           }
           actions={
             <div className="flex items-center gap-2">
-              {draft?.role === 'robot' && (
+              {draft?.role === 'robot' && !simulated && (
                 <Button
                   size="sm"
                   variant="secondary"
@@ -371,7 +446,18 @@ export function ConfigurePanel(): ReactNode {
                   {motionRunning ? <Spinner /> : 'Test motion'}
                 </Button>
               )}
-              {snapshot?.source === 'live' ? (
+              {simulated ? (
+                <>
+                  <Badge tone={control.engaged ? 'live' : 'accent'}>
+                    {control.engaged
+                      ? `flying — ${control.controller}`
+                      : streaming
+                        ? 'simulating'
+                        : 'simulated'}
+                  </Badge>
+                  <ArmControlButton control={control} />
+                </>
+              ) : snapshot?.source === 'live' ? (
                 <>
                   <Badge tone="live">{streaming ? 'reading positions' : 'connected'}</Badge>
                   <Button
@@ -402,7 +488,7 @@ export function ConfigurePanel(): ReactNode {
                   }
                   onClick={() => void connect()}
                 >
-                  {connecting ? <Spinner /> : 'Read motor positions'}
+                  {connecting ? <Spinner /> : 'CONNECT'}
                 </Button>
               )}
             </div>
@@ -422,7 +508,7 @@ export function ConfigurePanel(): ReactNode {
             </div>
           ) : (
             <div className="flex flex-col gap-3">
-              {!envReady && (
+              {!envReady && !simulated && (
                 <Notice tone="warn" title="Environment not ready">
                   Set up Python and install LeRobot in Settings before connecting to hardware.
                 </Notice>
@@ -502,6 +588,11 @@ export function ConfigurePanel(): ReactNode {
                   {actionError}
                 </Notice>
               )}
+              {actionNotice && (
+                <Notice tone="success" onClose={() => setActionNotice(null)}>
+                  {actionNotice}
+                </Notice>
+              )}
 
               {snapshot && (
                 <ArmDiagram
@@ -539,14 +630,106 @@ export function ConfigurePanel(): ReactNode {
                   placeholder="No devices yet"
                   options={profiles.map((p) => ({
                     value: p.uid,
-                    label: `${p.id} — ${p.model} ${p.role === 'robot' ? 'follower' : 'leader'}`
+                    label: isVirtual(p.uid)
+                      ? `${p.id} — ${p.model} follower, simulated`
+                      : `${p.id} — ${p.model} ${p.role === 'robot' ? 'follower' : 'leader'}`
                   }))}
                 />
               </Field>
             </div>
           </Panel>
 
-          {draft && (
+          {draft && simulated && (
+            <Panel
+              collapsible
+              title="Device details"
+              description={`${draft.model} follower, simulated`}
+            >
+              <div className="flex flex-col gap-3">
+                <Notice tone="info" title="Nothing to set up">
+                  The virtual arm is fixed: it is always a {draft.model} follower called{' '}
+                  <code>{draft.id}</code>, it has no serial port, and it starts already calibrated.
+                  Use it to try the app out, to fly an arm from the keyboard or a gamepad, or to
+                  replay a recording with no hardware connected.
+                </Notice>
+
+                <Divider label="control" />
+
+                <ArmControlFields
+                  control={control}
+                  hint="Fly the arm from this screen and watch the motor table follow it. Teleoperate does the same with a bigger view and the option to record."
+                />
+
+                <Divider label="simulation" />
+
+                <Field
+                  label="Calibration file"
+                  hint="Written here if you save what the simulation is holding."
+                >
+                  <div className="rounded-md border border-shell-700 bg-shell-900 px-2.5 py-1.5 font-mono text-[11px] break-all text-ink-300">
+                    {calibrationPath}
+                  </div>
+                </Field>
+
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    disabled={control.engaged}
+                    title={
+                      control.engaged
+                        ? 'Stop control first — the loop would drive it straight back out again.'
+                        : 'Put every joint back to the middle of its factory range.'
+                    }
+                    onClick={() => {
+                      setActionNotice(null)
+                      void api.virtual.reset().then(async (res) => {
+                        if (!res.ok) setActionError(res.error)
+                        else {
+                          await refreshSnapshot()
+                          setActionNotice('The simulation is back at the middle of every range.')
+                        }
+                      })
+                    }}
+                  >
+                    Reset the simulation
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={control.engaged}
+                    title={
+                      control.engaged
+                        ? 'Stop control first — with torque off the arm would stop following it.'
+                        : torqueOn
+                          ? 'Stop holding the commanded pose. The joints then stay where they are.'
+                          : 'Hold the commanded pose again.'
+                    }
+                    onClick={() => {
+                      const next = !torqueOn
+                      void api.motor.torque(draft.uid, next).then((res) => {
+                        if (res.ok) setTorqueOn(next)
+                        else setActionError(res.error)
+                      })
+                    }}
+                  >
+                    {torqueOn ? 'Disable torque' : 'Enable torque'}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={savingCal}
+                    title="Write the simulation's current limits to its calibration file."
+                    onClick={() => void saveCalibrationFile()}
+                  >
+                    {savingCal ? <Spinner /> : 'Save calibration file'}
+                  </Button>
+                </div>
+              </div>
+            </Panel>
+          )}
+
+          {draft && !simulated && (
             <Panel
               collapsible
               title="Device details"
@@ -664,6 +847,7 @@ export function ConfigurePanel(): ReactNode {
           {draft && snapshot && (
             <Panel collapsible title="Motor">
               <MotorEditor
+                uid={draft.uid}
                 motor={motor}
                 snapshot={snapshot}
                 port={draft.port}
@@ -673,7 +857,7 @@ export function ConfigurePanel(): ReactNode {
             </Panel>
           )}
 
-          {draft && (
+          {draft && !simulated && (
             <Panel collapsible title="Calibration & motor setup">
               <div className="flex flex-col gap-3">
                 <Field label="Calibration file">
@@ -744,7 +928,7 @@ export function ConfigurePanel(): ReactNode {
                         variant="ghost"
                         onClick={() => {
                           const next = !torqueOn
-                          void api.motor.torque(next).then((res) => {
+                          void api.motor.torque(draft.uid, next).then((res) => {
                             if (res.ok) setTorqueOn(next)
                             else setActionError(res.error)
                           })

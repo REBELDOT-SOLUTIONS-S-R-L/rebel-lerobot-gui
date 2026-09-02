@@ -16,6 +16,7 @@ import {
   Toggle
 } from '../components/ui'
 import { api } from '../lib/api'
+import { useSticky } from '../lib/use-sticky'
 import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '../store/useAppStore'
 
@@ -53,8 +54,14 @@ export function SettingsPanel(): ReactNode {
   const [packages, setPackages] = useState<InstalledPackage[] | null>(null)
   const [packageFilter, setPackageFilter] = useState('')
   const [error, setError] = useState<string | null>(null)
-  const [extras, setExtras] = useState('core_scripts,feetech')
-  const [installFromSource, setInstallFromSource] = useState(false)
+  // The two install choices survive a tab switch — an install is often set up in
+  // one visit and started in another. The discovered interpreters, the package
+  // list and the filter over it are all re-read, so they do not.
+  const [extras, setExtras] = useSticky('settings.extras', () => 'core_scripts,feetech')
+  const [installFromSource, setInstallFromSource] = useSticky(
+    'settings.installFromSource',
+    () => false
+  )
 
   const run: RunInfo | null = useMemo(
     () => runs.find((r) => r.runId === activeRunId) ?? null,

@@ -8,6 +8,7 @@ import type {
   CommandSpec,
   DatasetMeta,
   DeviceProfile,
+  EpisodeActions,
   InferOptions,
   InstalledPackage,
   LerobotCapabilities,
@@ -22,6 +23,8 @@ import type {
   SerialPortInfo,
   TeleoperateOptions
 } from '@shared/types'
+import { drivenInApp } from '@shared/teleop-input'
+import { isVirtual } from '@shared/virtual'
 import { BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { existsSync } from 'node:fs'
 import { bridge } from './bridge/bridge-client'
@@ -59,11 +62,13 @@ import { ptyAvailable, ptyError, runner } from './runner/process-runner'
 import {
   deleteProfile,
   getProfile,
+  isReservedDeviceId,
   isValidDeviceId,
-  profiles,
+  listProfiles,
   settings,
   upsertProfile
 } from './stores/settings'
+import { virtualBus } from './virtual-bus'
 
 let capsCache: LerobotCapabilities | null = null
 /** Resolved `uv` path, refreshed whenever the renderer asks for it. */
@@ -94,10 +99,32 @@ function resolver(): ScriptResolver {
   }
 }
 
-function requireProfile(uid: string | null | undefined): DeviceProfile {
+/** Resolve a device, virtual or real. */
+function requireDevice(uid: string | null | undefined): DeviceProfile {
+  // Told apart, because a command preview asks before anything is selected and
+  // "no longer exists" would be both wrong and alarming.
+  if (!uid) throw new Error('No device selected.')
   const profile = getProfile(uid)
   if (!profile) throw new Error('That device profile no longer exists.')
+  return profile
+}
+
+/** Resolve a device that has to be reachable over a wire. */
+function requireProfile(uid: string | null | undefined): DeviceProfile {
+  const profile = requireDevice(uid)
+  if (isVirtual(profile.uid)) {
+    throw new Error(
+      'The virtual arm is simulated in the app, so it has no serial port and cannot run a LeRobot command.'
+    )
+  }
   if (!profile.port) throw new Error(`Profile '${profile.id}' has no serial port selected.`)
+  return profile
+}
+
+/** Resolve a wired device and make sure the sidecar is up to reach it. */
+async function wiredDevice(uid: string | null | undefined): Promise<DeviceProfile> {
+  const profile = requireProfile(uid)
+  await bridge.ensure(requireVenv())
   return profile
 }
 
@@ -189,7 +216,7 @@ export function registerIpc(): void {
 
   /* -- profiles ----------------------------------------------------- */
 
-  handle('profiles:list', (): DeviceProfile[] => profiles().get().profiles)
+  handle('profiles:list', (): DeviceProfile[] => listProfiles())
 
   handle('profiles:save', (profile: DeviceProfile): DeviceProfile[] => {
     if (!isValidDeviceId(profile.id)) {
@@ -197,9 +224,10 @@ export function registerIpc(): void {
         'The device name becomes a filename and a LeRobot id, so use letters, digits, dot, dash or underscore only.'
       )
     }
-    const clash = profiles()
-      .get()
-      .profiles.find((p) => p.uid !== profile.uid && p.id === profile.id)
+    if (isReservedDeviceId(profile.id)) {
+      throw new Error(`'${profile.id}' is the virtual arm's name — pick another.`)
+    }
+    const clash = listProfiles().find((p) => p.uid !== profile.uid && p.id === profile.id)
     if (clash) throw new Error(`Another profile already uses the name '${profile.id}'.`)
     return upsertProfile(profile)
   })
@@ -300,11 +328,16 @@ export function registerIpc(): void {
     }
   )
 
-  /* -- motor bus ---------------------------------------------------- */
+  /* -- motor bus ---------------------------------------------------- *
+   *
+   * Every call names the arm it is about. The virtual one is answered in
+   * process and the real ones through the sidecar, and the two can be open at
+   * once — driving the virtual follower from a real leader needs exactly that —
+   * so nothing here means "whatever the bridge happens to have open" any more.
+   */
 
   handle('bus:scan', async (uid: string): Promise<ScanResult> => {
-    const profile = requireProfile(uid)
-    await bridge.ensure(requireVenv())
+    const profile = await wiredDevice(uid)
     return bridge.request<ScanResult>('bus.scan', { port: profile.port }, 180_000)
   })
 
@@ -313,8 +346,8 @@ export function registerIpc(): void {
    * motor IDs and limits still display when the arm is unplugged.
    */
   handle('bus:connect', async (uid: string): Promise<BusSnapshot> => {
-    const profile = requireProfile(uid)
-    await bridge.ensure(requireVenv())
+    if (isVirtual(uid)) return virtualBus.snapshot()
+    const profile = await wiredDevice(uid)
     try {
       await bridge.request('bus.open', { port: profile.port }, 30_000)
       const state = await bridge.request<Parameters<typeof snapshotFromBridge>[1]>('bus.state', {}, 30_000)
@@ -331,15 +364,21 @@ export function registerIpc(): void {
     }
   })
 
-  handle('bus:offlineSnapshot', (uid: string): BusSnapshot => readOfflineSnapshot(requireProfile(uid)))
+  // The virtual arm has no offline state to fall back to: the simulation *is*
+  // the arm, and it is always there.
+  handle('bus:offlineSnapshot', (uid: string): BusSnapshot =>
+    isVirtual(uid) ? virtualBus.snapshot() : readOfflineSnapshot(requireProfile(uid))
+  )
 
   handle('bus:refresh', async (uid: string): Promise<BusSnapshot> => {
+    if (isVirtual(uid)) return virtualBus.snapshot()
     const profile = requireProfile(uid)
     const state = await bridge.request<Parameters<typeof snapshotFromBridge>[1]>('bus.state', {}, 30_000)
     return snapshotFromBridge(profile, state)
   })
 
-  handle('bus:disconnect', async () => {
+  handle('bus:disconnect', async (uid?: string) => {
+    if (isVirtual(uid)) return virtualBus.close()
     if (!bridge.running) return { closed: true }
     return bridge.request('bus.close', {}, 10_000)
   })
@@ -351,13 +390,18 @@ export function registerIpc(): void {
     return bridge.request<BusPresence>('bus.presentIds', { port }, 30_000)
   })
 
-  handle('bus:streamStart', (hz = 10) => bridge.request('bus.streamStart', { hz }))
+  handle('bus:streamStart', (uid: string | undefined, hz: number | undefined) =>
+    isVirtual(uid)
+      ? virtualBus.streamStart(hz ?? 10)
+      : bridge.request('bus.streamStart', { hz: hz ?? 10 })
+  )
   // Panels call the stop handlers on teardown without knowing whether anything
   // was ever started, so "stop what isn't running" succeeds trivially rather than
   // failing — the same courtesy bus:disconnect already extends.
-  handle('bus:streamStop', () =>
-    bridge.running ? bridge.request('bus.streamStop') : { stopped: true }
-  )
+  handle('bus:streamStop', (uid?: string) => {
+    if (isVirtual(uid)) return virtualBus.streamStop()
+    return bridge.running ? bridge.request('bus.streamStop') : { stopped: true }
+  })
   handle('bus:configureMotors', () => bridge.request('bus.configure', {}, 60_000))
 
   // The sequence itself runs in the bridge: it owns the countdown, so cancelling
@@ -394,25 +438,49 @@ export function registerIpc(): void {
     await bridge.ensure(requireVenv())
     return bridge.request<MotorIdWriteResult>('motor.writeId', { ...req }, 60_000)
   })
-  handle('motor:setLimits', (motor: string, rangeMin: number, rangeMax: number) =>
-    bridge.request('motor.setLimits', { motor, rangeMin, rangeMax }, 30_000)
+  handle('motor:setLimits', (uid: string, motor: string, rangeMin: number, rangeMax: number) =>
+    isVirtual(uid)
+      ? virtualBus.setLimits(motor, rangeMin, rangeMax)
+      : bridge.request('motor.setLimits', { motor, rangeMin, rangeMax }, 30_000)
   )
-  handle('motor:setHoming', (motor: string, offset: number) =>
-    bridge.request('motor.setHoming', { motor, offset }, 30_000)
+  handle('motor:setHoming', (uid: string, motor: string, offset: number) =>
+    isVirtual(uid)
+      ? virtualBus.setHoming(motor, offset)
+      : bridge.request('motor.setHoming', { motor, offset }, 30_000)
   )
-  handle('motor:torque', (enabled: boolean, motor?: string) =>
-    bridge.request('motor.torque', { enabled, motor: motor ?? null }, 30_000)
+  handle('motor:torque', (uid: string, enabled: boolean, motor?: string) =>
+    isVirtual(uid)
+      ? virtualBus.torque(enabled, motor)
+      : bridge.request('motor.torque', { enabled, motor: motor ?? null }, 30_000)
   )
-  handle('motor:move', (motor: string, position: number) =>
-    bridge.request('motor.move', { motor, position }, 15_000)
+  handle('motor:move', (uid: string, motor: string, position: number) =>
+    isVirtual(uid)
+      ? virtualBus.move(motor, position)
+      : bridge.request('motor.move', { motor, position }, 15_000)
+  )
+
+  /**
+   * Every joint at once — one round trip per control frame.
+   *
+   * What the app's own driving writes: keyboard and gamepad teleoperation solve
+   * a whole pose per frame, and a replay reads one per recorded frame. Writing
+   * them one motor at a time would cost six round trips at 50 Hz and land the
+   * joints at visibly different moments.
+   */
+  handle('motor:moveMany', (uid: string, positions: Record<string, number>) =>
+    isVirtual(uid)
+      ? virtualBus.moveMany(positions)
+      : bridge.request<{ written: string[] }>('motor.moveMany', { positions }, 15_000)
   )
 
   /* -- calibration files -------------------------------------------- */
 
-  handle('calibration:path', (uid: string) => calibrationPathFor(requireProfile(uid)))
+  // `requireDevice`, not `requireProfile`: a calibration file is a file, so the
+  // virtual arm can have one written and read back like any other device.
+  handle('calibration:path', (uid: string) => calibrationPathFor(requireDevice(uid)))
 
   handle('calibration:read', (uid: string): { path: string; data: CalibrationFile | null } => {
-    const profile = requireProfile(uid)
+    const profile = requireDevice(uid)
     const path = calibrationPathFor(profile)
     return { path, data: readCalibrationFile(path) }
   })
@@ -420,7 +488,7 @@ export function registerIpc(): void {
   handle('calibration:readPath', (path: string): CalibrationFile | null => readCalibrationFile(path))
 
   handle('calibration:write', (uid: string, data: CalibrationFile) => {
-    const profile = requireProfile(uid)
+    const profile = requireDevice(uid)
     const path = calibrationPathFor(profile)
     writeCalibrationFile(path, data)
     return path
@@ -428,15 +496,46 @@ export function registerIpc(): void {
 
   handle('calibration:split', (filePath: string) => splitCalibrationPath(filePath))
 
-  handle('calibration:applyToMotors', (data: CalibrationFile) =>
-    bridge.request('calibration.apply', { calibration: data }, 60_000)
+  handle('calibration:applyToMotors', (uid: string, data: CalibrationFile) =>
+    isVirtual(uid)
+      ? virtualBus.applyCalibration(data)
+      : bridge.request('calibration.apply', { calibration: data }, 60_000)
   )
 
-  handle('calibration:readFromMotors', () => bridge.request<CalibrationFile>('calibration.read', {}, 30_000))
+  handle('calibration:readFromMotors', (uid: string) =>
+    isVirtual(uid)
+      ? virtualBus.calibration()
+      : bridge.request<CalibrationFile>('calibration.read', {}, 30_000)
+  )
+
+  /* -- virtual arm -------------------------------------------------- */
+
+  handle('virtual:reset', () => virtualBus.reset())
 
   /* -- datasets ----------------------------------------------------- */
 
   handle('datasets:read', (root: string): DatasetMeta => readDatasetMeta(root))
+
+  /**
+   * One episode's actions, for the replay the app performs itself.
+   *
+   * Only needed when the target is the virtual arm — a real follower gets
+   * `lerobot-replay`, which is better at this than we could be. Reading the
+   * episode still goes through LeRobot's own dataset class, so it needs the
+   * environment even though nothing is driven by it.
+   */
+  handle(
+    'datasets:episode',
+    async (params: {
+      root: string
+      repoId: string
+      episode: number
+      maxFrames?: number
+    }): Promise<EpisodeActions> => {
+      await bridge.ensure(requireVenv())
+      return bridge.request<EpisodeActions>('dataset.episode', { ...params }, 180_000)
+    }
+  )
   handle('datasets:isRoot', (root: string) => isDatasetRoot(root))
   handle('datasets:discover', (): DatasetMeta[] => {
     const extra = settings().get().defaultDatasetRoot
@@ -484,6 +583,9 @@ export function registerIpc(): void {
   runner.on('output', (payload) => broadcast('run:output', payload))
   runner.on('status', (info) => broadcast('run:status', info))
   bridge.on('notification', (frame) => broadcast('bridge:notification', frame))
+  // Same channel as the sidecar's frames, tagged with `source: 'virtual'`, so a
+  // panel reading positions does not care which arm it is watching.
+  virtualBus.on('notification', (frame) => broadcast('bridge:notification', frame))
   bridge.on('log', (text) => broadcast('bridge:log', text))
   bridge.on('closed', (payload) => broadcast('bridge:closed', payload))
   bridge.on('ready', (payload) => broadcast('bridge:ready', payload))
@@ -519,6 +621,11 @@ function buildCommand(kind: RunKind, payload: unknown): CommandSpec {
     }
     case 'teleoperate': {
       const opts = payload as TeleoperateOptions
+      if (drivenInApp(opts)) {
+        throw new Error(
+          'This setup is driven by the app itself, so there is no LeRobot command to run.'
+        )
+      }
       const devices = resolveTeleopDevices(opts)
       return opts.record
         ? buildRecordCommand(resolver(), opts, devices)

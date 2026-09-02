@@ -57,6 +57,7 @@ const withCameras: DeviceProfile = {
 
 function teleopOptions(patch: Partial<TeleoperateOptions> = {}): TeleoperateOptions {
   return {
+    controller: 'leader',
     setup: 'single',
     robotUid: 'f1',
     leaderUid: 'l1',

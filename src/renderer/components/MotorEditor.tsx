@@ -18,12 +18,15 @@ import { Badge, Button, Field, Notice, NumberInput, Spinner, Toggle } from './ui
  * until it is explicitly forced.
  */
 export function MotorEditor({
+  uid,
   motor,
   snapshot,
   port,
   onChanged,
   disabled
 }: {
+  /** Which arm's motors these writes go to — the virtual one, or a real bus. */
+  uid: string
   motor: MotorState | null
   snapshot: BusSnapshot
   /** Serial port from the device profile — an ID can be written without connecting. */
@@ -96,7 +99,9 @@ export function MotorEditor({
   const limitsChanged =
     (minDraft !== '' && minNumber !== motor.rangeMin) || (maxDraft !== '' && maxNumber !== motor.rangeMax)
 
+  const simulated = snapshot.simulated === true
   const idBlocked =
+    simulated ||
     idDraft === '' ||
     sourceDraft === '' ||
     !sourceValid ||
@@ -198,96 +203,107 @@ export function MotorEditor({
         </Notice>
       )}
 
-      <Field
-        label="Motor ID"
-        error={idCheck.invalid && idDraft !== '' ? idCheck.reason : null}
-        hint={
-          port
-            ? 'Sent to the motor answering at the left ID. The rest of the arm can stay connected.'
-            : 'Select the device serial port first.'
-        }
-      >
-        <div className="flex items-center gap-2">
-          <NumberInput
-            value={sourceDraft}
-            min={0}
-            max={MAX_MOTOR_ID}
-            title="ID this motor answers to today"
-            disabled={disabled || !port}
-            onChange={(e) => setSourceDraft(e.currentTarget.value)}
-          />
-          <span className="text-ink-600">→</span>
-          <NumberInput
-            value={idDraft}
-            min={0}
-            max={MAX_MOTOR_ID}
-            title="New ID to write"
-            disabled={disabled || !port}
-            onChange={(e) => setIdDraft(e.currentTarget.value)}
-          />
-          <Button
-            size="sm"
-            variant="primary"
-            disabled={idBlocked || busy !== null}
-            onClick={() => void writeId()}
-          >
-            {busy === 'Motor ID' ? <Spinner /> : 'Write'}
-          </Button>
-        </div>
-      </Field>
-
-      <div className="flex flex-wrap items-center gap-2">
-        <Button
-          size="sm"
-          variant="ghost"
-          disabled={disabled || !port || busy !== null}
-          title="Ping every ID on the bus. Works without connecting the arm."
-          onClick={() => void checkBus()}
-        >
-          {busy === 'Check bus' ? <Spinner /> : 'Check which IDs answer'}
-        </Button>
-        {busIds !== null && (
-          <span className="font-mono text-xs text-ink-500">
-            {busIds.length ? `answering: ${busIds.join(', ')}` : 'nothing answered'}
-          </span>
-        )}
-      </div>
-
-      {sourceMissing && (
-        <Notice tone="warn" onClose={() => setBusIds(null)}>
-          Nothing answers at ID {sourceNumber}, so a write to it cannot get a reply.{' '}
-          {busIds && busIds.length > 0
-            ? 'Write to one of the IDs that did answer instead:'
-            : 'Check power and the cable to the first motor.'}
-          {busIds && busIds.length > 0 && (
-            <span className="mt-2 flex flex-wrap gap-1.5">
-              {busIds.map((id) => (
-                <Button key={id} size="sm" variant="secondary" onClick={() => setSourceDraft(String(id))}>
-                  use {id}
-                </Button>
-              ))}
-            </span>
-          )}
+      {simulated && (
+        <Notice tone="info">
+          This arm is simulated, so there is no EEPROM to rewrite and no bus to ping. Its travel
+          limits are editable and take effect immediately.
         </Notice>
       )}
 
-      {idCheck.needsForce && idDraft !== '' && (
-        <div className="rounded-lg border border-warn-600/50 bg-warn-600/10 px-3 py-2.5">
-          <p className="text-xs leading-relaxed text-warn-400">{idCheck.reason}</p>
-          <div className="mt-2">
-            <Toggle
-              checked={force}
-              onChange={setForce}
+      {!simulated && (
+        <>
+        <Field
+          label="Motor ID"
+          error={idCheck.invalid && idDraft !== '' ? idCheck.reason : null}
+          hint={
+            port
+              ? 'Sent to the motor answering at the left ID. The rest of the arm can stay connected.'
+              : 'Select the device serial port first.'
+          }
+        >
+          <div className="flex items-center gap-2">
+            <NumberInput
+              value={sourceDraft}
+              min={0}
+              max={MAX_MOTOR_ID}
+              title="ID this motor answers to today"
               disabled={disabled || !port}
-              label="Force this write"
-              hint={
-                idNumber === sourceNumber
-                  ? 'Sends the ID the motor already has — harmless, and it proves the motor is listening.'
-                  : 'Sends it anyway. Two motors answering to one ID makes the bus unusable until you move the other one too.'
-              }
+              onChange={(e) => setSourceDraft(e.currentTarget.value)}
             />
+            <span className="text-ink-600">→</span>
+            <NumberInput
+              value={idDraft}
+              min={0}
+              max={MAX_MOTOR_ID}
+              title="New ID to write"
+              disabled={disabled || !port}
+              onChange={(e) => setIdDraft(e.currentTarget.value)}
+            />
+            <Button
+              size="sm"
+              variant="primary"
+              disabled={idBlocked || busy !== null}
+              onClick={() => void writeId()}
+            >
+              {busy === 'Motor ID' ? <Spinner /> : 'Write'}
+            </Button>
           </div>
+        </Field>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={disabled || !port || busy !== null}
+            title="Ping every ID on the bus. Works without connecting the arm."
+            onClick={() => void checkBus()}
+          >
+            {busy === 'Check bus' ? <Spinner /> : 'Check which IDs answer'}
+          </Button>
+          {busIds !== null && (
+            <span className="font-mono text-xs text-ink-500">
+              {busIds.length ? `answering: ${busIds.join(', ')}` : 'nothing answered'}
+            </span>
+          )}
         </div>
+
+        {sourceMissing && (
+          <Notice tone="warn" onClose={() => setBusIds(null)}>
+            Nothing answers at ID {sourceNumber}, so a write to it cannot get a reply.{' '}
+            {busIds && busIds.length > 0
+              ? 'Write to one of the IDs that did answer instead:'
+              : 'Check power and the cable to the first motor.'}
+            {busIds && busIds.length > 0 && (
+              <span className="mt-2 flex flex-wrap gap-1.5">
+                {busIds.map((id) => (
+                  <Button key={id} size="sm" variant="secondary" onClick={() => setSourceDraft(String(id))}>
+                    use {id}
+                  </Button>
+                ))}
+              </span>
+            )}
+          </Notice>
+        )}
+
+        {idCheck.needsForce && idDraft !== '' && (
+          <div className="rounded-lg border border-warn-600/50 bg-warn-600/10 px-3 py-2.5">
+            <p className="text-xs leading-relaxed text-warn-400">{idCheck.reason}</p>
+            <div className="mt-2">
+              <Toggle
+                checked={force}
+                onChange={setForce}
+                disabled={disabled || !port}
+                label="Force this write"
+                hint={
+                  idNumber === sourceNumber
+                    ? 'Sends the ID the motor already has — harmless, and it proves the motor is listening.'
+                    : 'Sends it anyway. Two motors answering to one ID makes the bus unusable until you move the other one too.'
+                }
+              />
+            </div>
+          </div>
+        )}
+        </>
       )}
 
       <Field
@@ -323,7 +339,7 @@ export function MotorEditor({
             disabled={disabled || !live || !!limitsError || !limitsChanged || busy !== null}
             onClick={() =>
               void act('Limits', async () => {
-                const res = await api.motor.setLimits(motor.name, minNumber, maxNumber)
+                const res = await api.motor.setLimits(uid, motor.name, minNumber, maxNumber)
                 return { ok: res.ok, error: res.ok ? undefined : res.error }
               })
             }

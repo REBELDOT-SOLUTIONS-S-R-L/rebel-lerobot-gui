@@ -145,6 +145,21 @@ export const CONTINUOUS_JOINTS: Record<ArmModel, readonly string[]> = {
   SO101: ['wrist_roll']
 }
 
+/**
+ * Yaw, in radians, that puts the arm's reach on the base frame's +X axis.
+ *
+ * The two URDFs disagree about which way the arm faces from its own root frame:
+ * SO-101's reaches along +X, SO-100's along -Y. That is invisible while all the
+ * app does is pose a model, but end-effector control has to name directions —
+ * a key labelled "forward" has to send the tool forward on both arms — so the
+ * solver's chain is built with this rotation folded in ahead of the first joint
+ * (`buildChain`'s `base`). +Z is up in both, so a yaw is all it takes.
+ */
+export const BASE_YAW: Record<ArmModel, number> = {
+  SO100: Math.PI / 2,
+  SO101: 0
+}
+
 /** Everything known about how one joint's readings map onto the model. */
 export function jointTuning(model: ArmModel, joint: string): JointTuning {
   return {
@@ -197,6 +212,46 @@ export function jointAngleRad(
   return stops(joint.rest + (reversed ? -turned : turned) + offset)
 }
 
+/**
+ * The inverse of `jointAngleRad`: the encoder tick that puts a joint at `angle`.
+ *
+ * Inverse kinematics works in the URDF's radians, and the motors only take
+ * ticks, so this is the last step of every command the app sends itself —
+ * keyboard and gamepad teleoperation, and driving the virtual arm. Going back
+ * through the same tuning the 3D view uses is what makes the model and the arm
+ * agree about where a solved pose is.
+ *
+ * The result is clamped to the joint's calibrated range: an angle the URDF
+ * allows can still be past a stop this particular arm measured, and the
+ * calibration is the one that knows about the real hardware. Null when there is
+ * no range to work against, which is `jointAngleRad`'s rest-pose case seen from
+ * the other side.
+ */
+export function ticksForAngle(
+  joint: SimJoint,
+  angle: number,
+  reading: JointReading | undefined,
+  tuning: JointTuning = {}
+): number | null {
+  const { reversed = false, offset = 0 } = tuning
+  const min = reading?.rangeMin ?? 0
+  const max = reading?.rangeMax ?? STS3215_MAX_TICK
+  if (max <= min) return null
+
+  if (SPAN_JOINTS.includes(joint.name)) {
+    const span = joint.upper - joint.lower
+    if (span === 0) return null
+    const fraction = (angle - offset - joint.lower) / span
+    const travelled = clamp(reversed ? 1 - fraction : fraction, 0, 1)
+    return Math.round(min + travelled * (max - min))
+  }
+
+  const centre = (min + max) / 2
+  const turned = angle - offset - joint.rest
+  const ticks = centre + ((reversed ? -turned : turned) * TICKS_PER_TURN) / (2 * Math.PI)
+  return Math.round(clamp(ticks, min, max))
+}
+
 /** Every joint's angle, keyed by motor name. */
 export function poseFromReadings(
   manifest: SimManifest,
@@ -224,6 +279,55 @@ export function readingsFromMotors(motors: readonly MotorState[]): Record<string
     }
   }
   return readings
+}
+
+/** Every joint's tick, for a pose in radians. Joints with no range are dropped. */
+export function ticksFromPose(
+  manifest: SimManifest,
+  pose: Record<string, number>,
+  readings: Record<string, JointReading>
+): Record<string, number> {
+  const ticks: Record<string, number> = {}
+  for (const joint of manifest.joints) {
+    const angle = pose[joint.name]
+    if (typeof angle !== 'number' || Number.isNaN(angle)) continue
+    const tick = ticksForAngle(
+      joint,
+      angle,
+      readings[joint.name],
+      jointTuning(manifest.model, joint.name)
+    )
+    if (tick !== null) ticks[joint.name] = tick
+  }
+  return ticks
+}
+
+/**
+ * The pose an arm holds at the middle of every calibrated range.
+ *
+ * What the "home" command drives to, and the safest pose to start a solve from.
+ * Not simply each joint's `rest` angle: a joint with a tuning offset — SO-101's
+ * `wrist_roll`, whose servo zero sits a quarter turn from the URDF's — reads
+ * `rest + offset` at mid-range, and driving it to `rest` instead would park it a
+ * quarter turn off centre. Going through `jointAngleRad` keeps this the exact
+ * inverse of `ticksForAngle`, so homing lands on mid-scale to the tick.
+ */
+export function centrePose(
+  manifest: SimManifest,
+  readings: Record<string, JointReading>
+): Record<string, number> {
+  const pose: Record<string, number> = {}
+  for (const joint of manifest.joints) {
+    const reading = readings[joint.name]
+    const min = reading?.rangeMin ?? 0
+    const max = reading?.rangeMax ?? STS3215_MAX_TICK
+    pose[joint.name] = jointAngleRad(
+      joint,
+      { position: Math.round((min + max) / 2), rangeMin: min, rangeMax: max },
+      jointTuning(manifest.model, joint.name)
+    )
+  }
+  return pose
 }
 
 /** Overlay the live stream's ticks onto the snapshot's calibrated ranges. */
