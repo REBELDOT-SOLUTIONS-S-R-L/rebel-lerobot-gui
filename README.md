@@ -1,9 +1,9 @@
-# LeRobot Control
+# Rebel LeRobot GUI
 
 A cross-platform desktop app (Electron + React) for managing and controlling
 [LeRobot](https://github.com/huggingface/lerobot) SO-100 / SO-101 arms.
 
-Built by the **RebelDot Physical AI department**. MIT licensed — clone it, use
+Built by the **[RebelDot](https://rebeldot.com) Physical AI department**. MIT licensed — clone it, use
 it, change it; keep the copyright notice, and say where it came from.
 
 - Six workflow panels: **Configure**, **3D View**, **Teleoperate**, **Replay**,
@@ -70,6 +70,10 @@ position, travel limits, homing offset and gear ratio. Select a motor to edit it
 ID and limits (written to the motor's EEPROM), run calibration, assign motor IDs
 with the setup wizard, or scan the bus to see which IDs actually answer.
 
+![The Configure panel](assets/screenshots/Screenshot1_config.png)
+
+*The Configure panel — the annotated arm view, with a card per motor and the device form in the gutter.*
+
 Three things here go beyond driving the CLI:
 
 - **Write a motor ID** without unplugging the rest of the chain, and without a
@@ -114,6 +118,10 @@ without one it sits at the pose its calibration file describes. With the virtual
 arm selected it also gets a **Controller** and a **Start Control** button, which
 is the easiest place to learn the keys: what you press moves the thing on screen.
 
+![The 3D View panel](assets/screenshots/Screenshot2_3dview.png)
+
+*The 3D View panel — the follower's own model, posed from the motor readings, with the joint table beside it.*
+
 The scene is built offline in Blender from the URDF and STL parts in
 `assets/simulation` and shipped as a glTF binary, so the app only loads a model
 and writes one rotation per joint. Ticks become angles the way LeRobot does it —
@@ -148,6 +156,10 @@ than anything the encoder knows.
   orientation, bumpers for the jaws. Read through the browser's own Gamepad API,
   so any controller the OS recognises works with nothing to install.
 
+![The Teleoperate panel](assets/screenshots/Screenshot3_teleop.png)
+
+*The Teleoperate panel — leader, keyboard or gamepad, with the command it will run and its live output.*
+
 <kbd>Esc</kbd> gives up control, in this panel and in the two below that offer
 it.
 
@@ -171,13 +183,25 @@ this is `lerobot-replay`; on the virtual one the app steps through the episode
 itself, with start/pause/stop and a frame counter, and shows the model following
 it.
 
+![The Replay panel](assets/screenshots/Screenshot4_replay.png)
+
+*The Replay panel — a dataset folder, the episode list read from `meta/info.json`, and the arm to play it on.*
+
 **Infer** — run a trained policy. The command shape follows the installed
 LeRobot: newer builds use `lerobot-rollout`, older ones drive the policy through
 `lerobot-record` (which additionally requires an `eval_` dataset prefix, added
 automatically). The panel states which path it is taking.
 
+![The Infer panel](assets/screenshots/Screenshot5_infer.png)
+
+*The Infer panel — a policy checkpoint or Hugging Face model id, the task, and the cameras the policy expects.*
+
 **Settings** — appearance, Python discovery, venv creation, LeRobot install,
 installed package list, and the default calibration/dataset folders.
+
+![The Settings panel](assets/screenshots/Screenshot6_settings.png)
+
+*The Settings panel — theme, Python interpreter, environment, LeRobot install, and what the environment actually has.*
 
 **About** — who made this, and what it is for.
 
@@ -399,7 +423,7 @@ easier to live with: one place to prepare the Python environment, give each arm
 an identity, calibrate it, and then teleoperate, record, replay and run policies
 — without assembling command lines by hand.
 
-- **Created by** RebelDot — Physical AI department
+- **Created by** [RebelDot](https://rebeldot.com) — Physical AI department
 - **Contributors** Andrei Brumboiu &lt;andrei.brumboiu@rebeldot.com&gt;
 - **Built** August – September 2026
 - **Built with** [Claude Code](https://claude.com/claude-code), Anthropic's
@@ -423,3 +447,11 @@ Some things in this repository are not ours to license: the SO-ARM100 URDFs and
 meshes under `assets/simulation/`, LeRobot itself, and the RebelDot wordmarks
 under `assets/logo/`. [NOTICE](NOTICE) says which is which — read it before
 publishing a build, and swap the wordmarks for your own.
+
+---
+
+<p align="center">
+  <a href="https://rebeldot.com">
+    <img src="assets/logo/rebeldot-logo-tagline-white-yellow@3x.png" alt="RebelDot — Physical AI department" width="320">
+  </a>
+</p>

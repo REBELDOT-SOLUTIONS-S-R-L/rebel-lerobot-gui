@@ -100,16 +100,21 @@ export interface JointTuning {
 /**
  * Joints whose encoder counts up the opposite way to the URDF's rotation.
  *
- * `shoulder_pan` was found reversed on a real SO-101. The SO-100 is not listed
- * because the two URDFs disagree about which way that joint turns: SO-101's
- * origin puts the joint axis at -Z in the base frame (positive is clockwise seen
- * from above), SO-100's at +Z (counter-clockwise). Same servo, opposite
- * conventions, so only one of them needs flipping. That half is reasoned from
- * the geometry rather than watched on an arm.
+ * Empty for both models. `shoulder_pan` used to be listed for the SO-101, but
+ * driving a real arm from the keyboard showed it mirrored: pressing left sent the
+ * tool right while the 3D view — which follows the arm's live readings — went
+ * left. The GUI reads and writes raw ticks and never consults the calibration's
+ * `drive_mode`, so this flag is the only thing that can mirror a joint, and the
+ * flip it applied to `shoulder_pan` was the mirror itself, not a cure for one.
+ *
+ * The URDF axis direction the old note reasoned from (SO-101 at -Z, SO-100 at +Z)
+ * is already carried by the kinematic chain, which reads each joint's axis vector
+ * in `parseUrdfJoints`; repeating it here as a reversal double-counted it. The
+ * SO-100 base has not been checked on real hardware.
  */
 export const REVERSED_JOINTS: Record<ArmModel, readonly string[]> = {
   SO100: [],
-  SO101: ['shoulder_pan']
+  SO101: []
 }
 
 /**
