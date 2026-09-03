@@ -7,12 +7,15 @@ import {
   type SimManifest
 } from '@shared/sim'
 import type { BusSnapshot } from '@shared/types'
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { isVirtual } from '@shared/virtual'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { ArmControlButton, ArmControlFields } from '../components/ArmControl'
+import { ArmViewport } from '../components/ArmViewport'
 import { SplitLayout } from '../components/SplitLayout'
 import { Badge, Button, Field, Notice, Panel, Select, Spinner } from '../components/ui'
-import { api, errorMessage } from '../lib/api'
-import { ArmScene, loadSimManifest } from '../lib/arm-scene'
-import { useResolvedTheme } from '../lib/theme'
+import { api } from '../lib/api'
+import { useArmControl } from '../lib/use-arm-control'
+import { useSticky } from '../lib/use-sticky'
 import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '../store/useAppStore'
 
@@ -35,92 +38,27 @@ export function View3DPanel(): ReactNode {
   )
   const followers = useMemo(() => profiles.filter((p) => p.role === 'robot'), [profiles])
 
-  const [selectedUid, setSelectedUid] = useState<string | null>(null)
+  const [selectedUid, setSelectedUid] = useSticky('view3d.device', () => null)
   const [snapshot, setSnapshot] = useState<BusSnapshot | null>(null)
   const [readings, setReadings] = useState<Record<string, JointReading>>({})
   const [manifest, setManifest] = useState<SimManifest | null>(null)
-  const [loading, setLoading] = useState(false)
   const [connecting, setConnecting] = useState(false)
   const [streaming, setStreaming] = useState(false)
-  const [sceneError, setSceneError] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
-
-  const canvasRef = useRef<HTMLCanvasElement | null>(null)
-  const sceneRef = useRef<ArmScene | null>(null)
-  const theme = useResolvedTheme()
 
   const device = followers.find((p) => p.uid === selectedUid) ?? null
   const envReady = !!caps?.ok
   const live = snapshot?.source === 'live'
+  const simulated = isVirtual(device?.uid)
 
+  // As in Configure: pick one on load, and let go of a remembered selection that
+  // no longer names a follower.
   useEffect(() => {
-    if (!selectedUid && followers.length > 0) setSelectedUid(followers[0].uid)
-  }, [followers, selectedUid])
-
-  /* -- the WebGL scene ---------------------------------------------- */
-
-  useEffect(() => {
-    const canvas = canvasRef.current
-    if (!canvas) return
-    try {
-      sceneRef.current = new ArmScene(canvas)
-    } catch (err) {
-      setSceneError(
-        `This window could not start WebGL, so the 3D view cannot be drawn. ${errorMessage(err)}`
-      )
-      return
+    if (followers.length === 0) return
+    if (!selectedUid || !followers.some((p) => p.uid === selectedUid)) {
+      setSelectedUid(followers[0].uid)
     }
-    const scene = sceneRef.current
-    return () => {
-      scene.dispose()
-      sceneRef.current = null
-    }
-  }, [])
-
-  // Load the model for whichever arm is selected. Keyed on the model, not the
-  // device: two followers of the same model share one scene.
-  const model = device?.model ?? null
-  useEffect(() => {
-    const scene = sceneRef.current
-    if (!scene || !model) return
-    let cancelled = false
-    setLoading(true)
-    setSceneError(null)
-    void loadSimManifest(model)
-      .then(async (loaded) => {
-        if (cancelled) return
-        await scene.load(loaded)
-        if (cancelled) return
-        setManifest(loaded)
-      })
-      .catch((err: unknown) => {
-        if (cancelled) return
-        setManifest(null)
-        setSceneError(
-          `Could not load the ${model} scene. Rebuild it with \`npm run build:sim\`. ${errorMessage(err)}`
-        )
-      })
-      .finally(() => !cancelled && setLoading(false))
-    return () => {
-      cancelled = true
-    }
-  }, [model])
-
-  useEffect(() => sceneRef.current?.setTheme(theme), [theme, manifest])
-
-  // Pose the model. `immediate` on the first pose after a load, so the arm does
-  // not visibly swing in from the URDF's rest position.
-  const posedOnce = useRef(false)
-  useEffect(() => {
-    posedOnce.current = false
-  }, [manifest])
-  useEffect(() => {
-    if (!manifest) return
-    sceneRef.current?.setPose(poseFromReadings(manifest, readings), {
-      immediate: !posedOnce.current
-    })
-    posedOnce.current = true
-  }, [manifest, readings])
+  }, [followers, selectedUid, setSelectedUid])
 
   /* -- the bus ------------------------------------------------------ */
 
@@ -146,6 +84,23 @@ export function View3DPanel(): ReactNode {
     if (device) void loadOffline()
   }, [device?.uid, loadOffline])
 
+  /**
+   * The simulation has nothing to connect to, so it just runs: selecting it is
+   * the whole handshake, and this starts the stream that drives the model.
+   */
+  useEffect(() => {
+    const uid = device?.uid
+    if (!simulated || !uid) return
+    let cancelled = false
+    void api.bus.streamStart(uid, STREAM_HZ).then((res) => {
+      if (!cancelled) setStreaming(res.ok)
+    })
+    return () => {
+      cancelled = true
+      void api.bus.streamStop(uid)
+    }
+  }, [simulated, device?.uid])
+
   useEffect(() => {
     if (!streaming) return
     return api.bridge.onNotification((frame) => {
@@ -168,7 +123,7 @@ export function View3DPanel(): ReactNode {
     if (res.ok) {
       showSnapshot(res.value)
       if (res.value.source === 'live') {
-        const started = await api.bus.streamStart(STREAM_HZ)
+        const started = await api.bus.streamStart(device.uid, STREAM_HZ)
         setStreaming(started.ok)
       }
     } else {
@@ -178,19 +133,37 @@ export function View3DPanel(): ReactNode {
   }, [device?.uid, showSnapshot])
 
   const disconnect = useCallback(async () => {
-    await api.bus.streamStop()
-    await api.bus.disconnect()
+    if (!device) return
+    await api.bus.streamStop(device.uid)
+    await api.bus.disconnect(device.uid)
     setStreaming(false)
     await loadOffline()
-  }, [loadOffline])
+  }, [device?.uid, loadOffline])
 
   // Leave the bus free for the other panels.
   useEffect(() => {
+    const uid = device?.uid
     return () => {
-      void api.bus.streamStop()
-      void api.bus.disconnect()
+      void api.bus.streamStop(uid)
+      void api.bus.disconnect(uid)
     }
-  }, [])
+  }, [device?.uid])
+
+  /**
+   * Flying the arm while watching its model.
+   *
+   * The most natural place to learn the controls, and the reason the simulated
+   * arm needs no hardware: what you press moves the thing on screen. Offered for
+   * the simulation only — a real arm is driven from Teleoperate, where its torque
+   * and its leader are set up deliberately.
+   */
+  const control = useArmControl({
+    uid: device?.uid ?? null,
+    model: device?.model ?? null,
+    available: simulated && live,
+    readings,
+    panel: 'view3d'
+  })
 
   const pose = manifest ? poseFromReadings(manifest, readings) : {}
   const uncalibrated = snapshot?.motors.some((m) => m.rangeMin === null) ?? false
@@ -208,27 +181,32 @@ export function View3DPanel(): ReactNode {
           bodyClassName="flex min-h-0 flex-1 flex-col gap-3"
           title={device ? `${device.id} — ${device.model} follower` : '3D view'}
           description={
-            live
-              ? `Live from ${snapshot?.port} — the model follows every reading`
-              : snapshot?.source === 'calibration-file'
-                ? 'Posed from the calibration file — connect the arm to follow it live'
-                : device
-                  ? 'Factory defaults — calibrate this arm for a pose that means something'
-                  : 'Select a follower to load its model'
+            control.engaged
+              ? `Flying from the ${control.controller} — press Esc to stop`
+              : snapshot?.simulated
+                ? 'Simulated in the app — the model follows the joints the app is driving'
+                : live
+                ? `Live from ${snapshot?.port} — the model follows every reading`
+                : snapshot?.source === 'calibration-file'
+                  ? 'Posed from the calibration file — connect the arm to follow it live'
+                  : device
+                    ? 'Factory defaults — calibrate this arm for a pose that means something'
+                    : 'Select a follower to load its model'
           }
           actions={
             <div className="flex items-center gap-2">
-              {manifest && (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  title="Back to the default camera framing."
-                  onClick={() => sceneRef.current?.resetView()}
-                >
-                  Reset view
-                </Button>
-              )}
-              {live ? (
+              {simulated ? (
+                <>
+                  <Badge tone={control.engaged ? 'live' : 'accent'}>
+                    {control.engaged
+                      ? `flying — ${control.controller}`
+                      : streaming
+                        ? 'simulating'
+                        : 'simulated'}
+                  </Badge>
+                  <ArmControlButton control={control} />
+                </>
+              ) : live ? (
                 <>
                   <Badge tone="live">{streaming ? 'following' : 'connected'}</Badge>
                   <Button size="sm" variant="secondary" onClick={() => void disconnect()}>
@@ -249,43 +227,33 @@ export function View3DPanel(): ReactNode {
                   }
                   onClick={() => void connect()}
                 >
-                  {connecting ? <Spinner /> : 'Follow the arm'}
+                  {connecting ? <Spinner /> : 'CONNECT'}
                 </Button>
               )}
             </div>
           }
         >
-          {sceneError && <Notice tone="error">{sceneError}</Notice>}
           {actionError && (
             <Notice tone="error" onClose={() => setActionError(null)}>
               {actionError}
             </Notice>
           )}
-          {uncalibrated && !sceneError && (
+          {uncalibrated && !simulated && (
             <Notice tone="warn" title="This arm has no calibration yet">
               Without a recorded range there is nothing to measure a position against, so the model is
               posed off the full encoder span. Calibrate it in Configure for a pose that matches the arm.
             </Notice>
           )}
 
-          <div className="relative min-h-0 flex-1 overflow-hidden rounded-xl bg-plate">
-            <canvas ref={canvasRef} className="absolute inset-0 block" />
-            {(loading || !device) && (
-              <div className="absolute inset-0 flex items-center justify-center bg-plate/80 text-sm text-ink-500">
-                {!device ? (
-                  followers.length === 0 ? (
-                    'Add a follower arm in Configure first.'
-                  ) : (
-                    'Select a follower.'
-                  )
-                ) : (
-                  <span className="flex items-center gap-2">
-                    <Spinner /> Loading the {device.model} model…
-                  </span>
-                )}
-              </div>
-            )}
-          </div>
+          <ArmViewport
+            model={device?.model ?? null}
+            pose={pose}
+            className="min-h-0 flex-1"
+            onManifest={setManifest}
+            placeholder={
+              followers.length === 0 ? 'Add a follower arm in Configure first.' : 'Select a follower.'
+            }
+          />
         </Panel>
       }
       side={
@@ -298,11 +266,20 @@ export function View3DPanel(): ReactNode {
                 placeholder={followers.length === 0 ? 'No follower arms yet' : 'Select a follower'}
                 options={followers.map((p) => ({
                   value: p.uid,
-                  label: `${p.id} — ${p.model}`
+                  label: isVirtual(p.uid) ? `${p.id} — ${p.model}, simulated` : `${p.id} — ${p.model}`
                 }))}
               />
             </Field>
           </Panel>
+
+          {simulated && (
+            <Panel title="Control">
+              <ArmControlFields
+                control={control}
+                hint="Fly the arm and watch the model follow it. Teleoperate does the same with the option to record."
+              />
+            </Panel>
+          )}
 
           <Panel
             collapsible

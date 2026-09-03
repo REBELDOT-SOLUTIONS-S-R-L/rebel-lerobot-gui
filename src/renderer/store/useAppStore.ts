@@ -8,6 +8,7 @@ import type {
 } from '@shared/types'
 import { create } from 'zustand'
 import { api, attempt } from '../lib/api'
+import { forgetDevice, type PanelSelections } from '../lib/panel-selections'
 
 export type PanelId =
   | 'configure'
@@ -32,6 +33,14 @@ interface AppState {
   runs: RunInfo[]
   /** Run currently shown in the console pane. */
   activeRunId: string | null
+  /**
+   * Panel selections that outlive the panel.
+   *
+   * Only one panel is mounted at a time, so this is where the choices that led
+   * to a view are kept while another tab is open — see `useSticky`, which is the
+   * only thing that should read or write it.
+   */
+  sticky: Partial<PanelSelections>
 
   setPanel: (panel: PanelId) => void
   bootstrap: () => Promise<void>
@@ -43,6 +52,7 @@ interface AppState {
   removeProfile: (uid: string) => Promise<void>
   refreshPorts: () => Promise<void>
   setActiveRun: (runId: string | null) => void
+  setSticky: <K extends keyof PanelSelections>(key: K, value: PanelSelections[K]) => void
   upsertRun: (info: RunInfo) => void
   refreshRuns: () => Promise<void>
 }
@@ -60,6 +70,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   portsLoading: false,
   runs: [],
   activeRunId: null,
+  sticky: {},
 
   setPanel: (panel) => set({ panel }),
 
@@ -125,7 +136,11 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   removeProfile: async (uid) => {
     const res = await attempt(api.profiles.remove(uid))
-    if (res.value) set({ profiles: res.value })
+    if (!res.value) return
+    const profiles = res.value
+    // Deleting a profile is the only thing that can make a selection dangle, so
+    // it is the one place that has to let go of it.
+    set((state) => ({ profiles, sticky: forgetDevice(state.sticky, uid) }))
   },
 
   refreshPorts: async () => {
@@ -139,6 +154,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   setActiveRun: (runId) => set({ activeRunId: runId }),
+
+  setSticky: (key, value) => set((state) => ({ sticky: { ...state.sticky, [key]: value } })),
 
   upsertRun: (info) =>
     set((state) => {

@@ -9,6 +9,7 @@ import type {
   CommandSpec,
   DatasetMeta,
   DeviceProfile,
+  EpisodeActions,
   FileFilter,
   InstalledPackage,
   LerobotCapabilities,
@@ -103,15 +104,22 @@ const api = {
       invoke<{ width: number; height: number; jpegBase64: string }>('cameras:snapshot', params)
   },
 
+  /**
+   * Reads and writes on one arm's motors.
+   *
+   * Every call names the device it is about: the virtual arm is answered inside
+   * the app and the real ones by the Python sidecar, and both can be open at
+   * once — a real leader driving the virtual follower needs exactly that.
+   */
   bus: {
     scan: (uid: string) => invoke<ScanResult>('bus:scan', uid),
     connect: (uid: string) => invoke<BusSnapshot>('bus:connect', uid),
     offlineSnapshot: (uid: string) => invoke<BusSnapshot>('bus:offlineSnapshot', uid),
     refresh: (uid: string) => invoke<BusSnapshot>('bus:refresh', uid),
-    disconnect: () => invoke<{ closed: boolean }>('bus:disconnect'),
+    disconnect: (uid?: string) => invoke<{ closed: boolean }>('bus:disconnect', uid),
     presentIds: (port?: string) => invoke<BusPresence>('bus:presentIds', port),
-    streamStart: (hz?: number) => invoke<{ hz: number }>('bus:streamStart', hz),
-    streamStop: () => invoke<{ stopped: boolean }>('bus:streamStop'),
+    streamStart: (uid?: string, hz?: number) => invoke<{ hz: number }>('bus:streamStart', uid, hz),
+    streamStop: (uid?: string) => invoke<{ stopped: boolean }>('bus:streamStop', uid),
     configureMotors: () => invoke<{ configured: boolean }>('bus:configureMotors'),
     recordRom: (durationS?: number) =>
       invoke<{ mins: Record<string, number>; maxes: Record<string, number> }>('bus:recordRom', durationS),
@@ -132,19 +140,28 @@ const api = {
 
   motor: {
     writeId: (req: MotorIdWriteRequest) => invoke<MotorIdWriteResult>('motor:writeId', req),
-    setLimits: (motor: string, rangeMin: number, rangeMax: number) =>
+    setLimits: (uid: string, motor: string, rangeMin: number, rangeMax: number) =>
       invoke<{ motor: string; rangeMin: number; rangeMax: number }>(
         'motor:setLimits',
+        uid,
         motor,
         rangeMin,
         rangeMax
       ),
-    setHoming: (motor: string, offset: number) =>
-      invoke<{ motor: string; homingOffset: number }>('motor:setHoming', motor, offset),
-    torque: (enabled: boolean, motor?: string) =>
-      invoke<{ enabled: boolean }>('motor:torque', enabled, motor),
-    move: (motor: string, position: number) =>
-      invoke<{ motor: string; goal: number }>('motor:move', motor, position)
+    setHoming: (uid: string, motor: string, offset: number) =>
+      invoke<{ motor: string; homingOffset: number }>('motor:setHoming', uid, motor, offset),
+    torque: (uid: string, enabled: boolean, motor?: string) =>
+      invoke<{ enabled: boolean }>('motor:torque', uid, enabled, motor),
+    move: (uid: string, motor: string, position: number) =>
+      invoke<{ motor: string; goal: number }>('motor:move', uid, motor, position),
+    /** Every joint in one write — a control frame, or a replayed one. */
+    moveMany: (uid: string, positions: Record<string, number>) =>
+      invoke<{ written: string[] }>('motor:moveMany', uid, positions)
+  },
+
+  virtual: {
+    /** Put the simulated arm back to the middle of every factory range. */
+    reset: () => invoke<{ reset: true }>('virtual:reset')
   },
 
   calibration: {
@@ -154,15 +171,17 @@ const api = {
     write: (uid: string, data: CalibrationFile) => invoke<string>('calibration:write', uid, data),
     split: (filePath: string) =>
       invoke<{ calibrationDir: string; id: string }>('calibration:split', filePath),
-    applyToMotors: (data: CalibrationFile) =>
-      invoke<{ applied: string[] }>('calibration:applyToMotors', data),
-    readFromMotors: () => invoke<CalibrationFile>('calibration:readFromMotors')
+    applyToMotors: (uid: string, data: CalibrationFile) =>
+      invoke<{ applied: string[] }>('calibration:applyToMotors', uid, data),
+    readFromMotors: (uid: string) => invoke<CalibrationFile>('calibration:readFromMotors', uid)
   },
 
   datasets: {
     read: (root: string) => invoke<DatasetMeta>('datasets:read', root),
     isRoot: (root: string) => invoke<boolean>('datasets:isRoot', root),
-    discover: () => invoke<DatasetMeta[]>('datasets:discover')
+    discover: () => invoke<DatasetMeta[]>('datasets:discover'),
+    episode: (params: { root: string; repoId: string; episode: number; maxFrames?: number }) =>
+      invoke<EpisodeActions>('datasets:episode', params)
   },
 
   commands: {

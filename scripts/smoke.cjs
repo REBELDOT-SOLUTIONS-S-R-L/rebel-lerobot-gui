@@ -8,6 +8,9 @@
 const { app, BrowserWindow, ipcMain } = require('electron')
 const path = require('node:path')
 
+/** Kept in step with `VIRTUAL_UID` in src/shared/virtual.ts. */
+const VIRTUAL_UID = 'virtual-arm'
+
 // Load the app's main bundle at module scope, exactly as Electron would for the
 // real entry point: it calls protocol.registerSchemesAsPrivileged, which must
 // happen before `app` is ready.
@@ -18,6 +21,14 @@ try {
   mainLoadError = err
 }
 
+/**
+ * The venv the checks below borrowed, to be put back at the end.
+ *
+ * Restored in `finish` rather than as soon as the bridge checks are done: the
+ * renderer probe asks which panel the app opens on, and that depends on whether
+ * an environment is configured.
+ */
+let restoreVenv
 const results = []
 const record = (name, ok, extra) => {
   results.push({ name, ok, extra })
@@ -35,7 +46,7 @@ async function callIpc(channel, ...args) {
 app.whenReady().then(async () => {
   if (mainLoadError) {
     record('main bundle loads', false, mainLoadError.message)
-    return finish()
+    return await finish()
   }
   record('main bundle loads', true)
 
@@ -68,8 +79,83 @@ app.whenReady().then(async () => {
   try {
     const profiles = await callIpc('profiles:list')
     record('profiles:list responds', profiles.ok === true, `count=${(profiles.value || []).length}`)
+    const virtual = (profiles.value || []).find((p) => p.uid === VIRTUAL_UID)
+    record(
+      'the virtual arm is offered before anything is configured',
+      !!virtual && virtual.role === 'robot' && virtual.port === '',
+      virtual ? `${virtual.id} ${virtual.model}` : 'not listed'
+    )
   } catch (err) {
     record('profiles:list responds', false, err.message)
+  }
+
+  // --- the virtual arm ----------------------------------------------------
+  // Its whole point is working with no serial port, no LeRobot and no Python, so
+  // these run before any environment is configured and must still pass.
+  try {
+    const opened = await callIpc('bus:connect', VIRTUAL_UID)
+    const snapshot = opened.ok ? opened.value : null
+    record(
+      'bus:connect drives the virtual arm with no environment',
+      !!snapshot && snapshot.simulated === true && snapshot.motors.length === 6,
+      snapshot ? `source=${snapshot.source} motors=${snapshot.motors.length}` : opened.error
+    )
+
+    const centres = {}
+    for (const motor of (snapshot && snapshot.motors) || []) {
+      centres[motor.name] = Math.round((motor.rangeMin + motor.rangeMax) / 2)
+    }
+    record(
+      'the virtual arm powers up calibrated, at the middle of every range',
+      Object.keys(centres).length === 6 &&
+        (snapshot.motors || []).every((m) => m.online && m.position === centres[m.name]),
+      (snapshot.motors || []).map((m) => `${m.name}=${m.position}`).join(' ')
+    )
+
+    const goals = {}
+    for (const [name, centre] of Object.entries(centres)) goals[name] = centre + 100
+    const written = await callIpc('motor:moveMany', VIRTUAL_UID, goals)
+    record(
+      'motor:moveMany writes a whole pose to the virtual arm',
+      written.ok === true && (written.value.written || []).length === 6,
+      written.ok ? written.value.written.join(',') : written.error
+    )
+
+    // The simulation travels to a goal rather than jumping to it, so give it a
+    // moment and then check it actually moved.
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    const after = await callIpc('bus:refresh', VIRTUAL_UID)
+    const moved = after.ok
+      ? after.value.motors.filter((m) => m.position !== centres[m.name]).length
+      : 0
+    record('the virtual arm travels towards the goals it is given', moved === 6, `moved=${moved}`)
+
+    const reset = await callIpc('virtual:reset')
+    const back = await callIpc('bus:refresh', VIRTUAL_UID)
+    record(
+      'virtual:reset puts it back to the middle of every range',
+      reset.ok === true &&
+        back.ok === true &&
+        back.value.motors.every((m) => m.position === centres[m.name]),
+      reset.ok ? '' : reset.error
+    )
+
+    const refused = await callIpc('profiles:save', {
+      uid: VIRTUAL_UID,
+      id: 'virtual_arm',
+      role: 'robot',
+      model: 'SO101',
+      port: '/dev/null',
+      calibrationDir: '/tmp',
+      cameras: []
+    })
+    record(
+      'the virtual arm cannot be edited or deleted',
+      refused.ok === false && (await callIpc('profiles:delete', VIRTUAL_UID)).ok === false,
+      refused.error
+    )
+  } catch (err) {
+    record('virtual arm checks', false, err.message)
   }
 
   try {
@@ -97,11 +183,10 @@ app.whenReady().then(async () => {
   // probe. Any venv with pyserial is enough for ports.list; LeRobot itself is
   // only needed for the motor calls.
   const smokeVenv = process.env.SMOKE_VENV
-  let previousVenv
   if (smokeVenv) {
     try {
       const before = await callIpc('settings:get')
-      previousVenv = before.ok ? before.value.venvPath : null
+      restoreVenv = before.ok ? before.value.venvPath : null
       const saved = await callIpc('settings:set', { venvPath: smokeVenv })
       record('settings:set accepts a venv path', saved.ok === true, smokeVenv)
 
@@ -127,11 +212,6 @@ app.whenReady().then(async () => {
       record('bridge stops cleanly', stopped.ok === true)
     } catch (err) {
       record('python bridge checks', false, err.message)
-    } finally {
-      // Never leave the user's configured environment pointing at a test venv.
-      if (previousVenv !== undefined) {
-        await callIpc('settings:set', { venvPath: previousVenv })
-      }
     }
   } else {
     console.log('SKIP  python bridge checks (set SMOKE_VENV=<venv path> to run them)')
@@ -271,13 +351,18 @@ app.whenReady().then(async () => {
       )
       // The 3D view fetches its scene over `arm://`, which is cross-origin from
       // the renderer — a protocol that only serves <img> would fail silently.
+      // The scenes, plus the URDFs the inverse-kinematics solver reads its joint
+      // origins out of — keyboard and gamepad teleoperation cannot work without
+      // them, and a protocol that only served <img> would fail silently.
       const scenes = await windows[0].webContents.executeJavaScript(`(async () => {
         const out = {}
         for (const name of [
           'simulation/generated/so100.json',
           'simulation/generated/so101.json',
           'simulation/generated/so100.glb',
-          'simulation/generated/so101.glb'
+          'simulation/generated/so101.glb',
+          'simulation/SO100/so100.urdf',
+          'simulation/SO101/so101_new_calib.urdf'
         ]) {
           try {
             const res = await fetch('arm://' + name)
@@ -290,8 +375,8 @@ app.whenReady().then(async () => {
       })()`)
       const sceneSizes = Object.values(scenes)
       record(
-        'arm:// serves the 3D scenes to fetch()',
-        sceneSizes.length === 4 && sceneSizes.every((v) => typeof v === 'number' && v > 0),
+        'arm:// serves the 3D scenes and URDFs to fetch()',
+        sceneSizes.length === 6 && sceneSizes.every((v) => typeof v === 'number' && v > 0),
         Object.entries(scenes)
           .map(([k, v]) => `${k.split('/').pop()}=${v}`)
           .join(' ')
@@ -308,10 +393,14 @@ app.whenReady().then(async () => {
     }
   }
 
-  finish()
+  await finish()
 })
 
-function finish() {
+async function finish() {
+  // Never leave the user's configured environment pointing at a test venv.
+  if (restoreVenv !== undefined) {
+    await callIpc('settings:set', { venvPath: restoreVenv })
+  }
   const failed = results.filter((r) => !r.ok)
   console.log(`\n${results.length - failed.length}/${results.length} checks passed`)
   app.exit(failed.length === 0 ? 0 : 1)

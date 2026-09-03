@@ -150,10 +150,12 @@ describe('gripper', () => {
 })
 
 /**
- * Which way a joint turns is a fact about the arm, not about the URDF: watched
- * on a real SO-101, shoulder_pan ran backwards against the model. The mirror is
- * about the rest pose, because that is the one pose the arm and the model were
- * already agreeing on before the fix.
+ * Which way a joint turns is a fact about the arm, not about the URDF, so
+ * `reversed` can mirror a joint's travel when its encoder counts against the
+ * model. The mirror is about the rest pose, the one pose the arm and the model
+ * agree on however the joint is wired. No joint currently needs it — see
+ * REVERSED_JOINTS — but the mechanism is kept and tested for the next arm that
+ * does.
  */
 describe('reversed joints', () => {
   it('mirrors a body joint about its rest angle', () => {
@@ -175,10 +177,11 @@ describe('reversed joints', () => {
     expect(jointAngleRad(jaw, shut, { reversed: true })).toBeCloseTo(jaw.upper, 10)
   })
 
-  it('flips shoulder_pan on the SO-101 but not on the SO-100', () => {
-    // The two URDFs put that joint's axis at opposite ends of the base frame's
-    // Z, so the same servo needs the flip in one and not the other.
-    expect(jointTuning('SO101', 'shoulder_pan').reversed).toBe(true)
+  it('reverses no body joint on either model', () => {
+    // Driving a real SO-101 showed shoulder_pan mirrored against the model, so
+    // the flip it used to carry was removed. The URDF axis direction is already
+    // in the kinematic chain and is not repeated as a reversal here.
+    expect(jointTuning('SO101', 'shoulder_pan').reversed).toBe(false)
     expect(jointTuning('SO100', 'shoulder_pan').reversed).toBe(false)
     expect(jointTuning('SO101', 'elbow_flex').reversed).toBe(false)
   })
@@ -194,12 +197,12 @@ describe('reversed joints', () => {
     }
   })
 
-  it('turns the SO-101 shoulder the other way than it used to', () => {
+  it('reads the SO-101 shoulder straight through, without a mirror', () => {
     const manifest = manifestFor('SO101')
     const readings = { shoulder_pan: { position: 2600, rangeMin: 700, rangeMax: 3400 } }
     const pan = manifest.joints.find((j) => j.name === 'shoulder_pan')!
     expect(poseFromReadings(manifest, readings).shoulder_pan).toBeCloseTo(
-      jointAngleRad(pan, readings.shoulder_pan, { reversed: true }),
+      jointAngleRad(pan, readings.shoulder_pan),
       10
     )
   })

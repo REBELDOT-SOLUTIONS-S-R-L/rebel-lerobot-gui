@@ -1068,6 +1068,33 @@ class BusSession:
             bus.write("Goal_Position", motor, int(position), normalize=False)
         return {"motor": motor, "goal": int(position)}
 
+    def move_many(self, positions: dict[str, int]) -> dict[str, Any]:
+        """
+        Write one goal per joint in a single bus transaction.
+
+        What the app's own control loops need: keyboard/gamepad teleoperation
+        solves a whole pose 50 times a second, and a replay reads one per
+        recorded frame. Six separate writes would cost six round trips and land
+        the joints at visibly different moments. Falls back to writing them one
+        at a time the way `_glide` does, for protocol 1 firmware with no
+        sync_write.
+        """
+        bus = self.require()
+        frame = {
+            name: int(value)
+            for name, value in positions.items()
+            if name in self.motor_ids and value is not None
+        }
+        if not frame:
+            return {"written": []}
+        with self._lock:
+            try:
+                bus.sync_write("Goal_Position", frame, normalize=False)
+            except Exception:  # noqa: BLE001 - protocol 1 has no sync_write
+                for name, value in frame.items():
+                    bus.write("Goal_Position", name, value, normalize=False)
+        return {"written": sorted(frame)}
+
     def apply_calibration(self, calibration: dict[str, dict[str, int]]) -> dict[str, Any]:
         """Push an edited calibration dict to the motors' EEPROM."""
         bus = self.require()
@@ -1378,6 +1405,10 @@ def m_motor_torque(enabled: bool, motor: str | None = None, **_: Any) -> dict[st
     return SESSION.set_torque(enabled, motor)
 
 
+def m_motor_move_many(positions: dict[str, int], **_: Any) -> dict[str, Any]:
+    return SESSION.move_many(positions or {})
+
+
 def m_motor_move(motor: str, position: int, **_: Any) -> dict[str, Any]:
     return SESSION.move_to(motor, position)
 
@@ -1399,6 +1430,53 @@ def m_setup_motor(motor: str, **_: Any) -> dict[str, Any]:
     bus = SESSION.require()
     bus.setup_motor(motor)
     return {"motor": motor, "id": SESSION.motor_ids.get(motor), "baudrate": DEFAULT_BAUDRATE}
+
+
+# ---------------------------------------------------------------------------
+# Datasets
+# ---------------------------------------------------------------------------
+
+#: A minute of 30 fps recording per request. Long enough for any teleoperated
+#: episode; the cap exists so a mistakenly huge dataset cannot be pulled into the
+#: renderer in one JSON frame.
+MAX_EPISODE_FRAMES = 20_000
+
+
+def m_dataset_episode(
+    root: str,
+    repoId: str,
+    episode: int = 0,
+    maxFrames: int | None = None,
+    **_: Any,
+) -> dict[str, Any]:
+    """
+    One episode's recorded actions, as plain numbers.
+
+    For the replay the app performs itself, which is the only way to replay onto
+    the virtual arm — `lerobot-replay` needs a real LeRobot device at the other
+    end. Loading goes through `LeRobotDataset` exactly as `lerobot_replay.py`
+    does, so whatever dataset layout that command can open works here too, and
+    the values come back in the normalized units it would send.
+    """
+    from lerobot.datasets import LeRobotDataset
+    from lerobot.utils.constants import ACTION
+
+    limit = int(maxFrames) if maxFrames else MAX_EPISODE_FRAMES
+    dataset = LeRobotDataset(repoId, root=root or None, episodes=[int(episode)])
+    names = list(dataset.features[ACTION]["names"])
+    actions = dataset.select_columns(ACTION)
+
+    total = int(dataset.num_frames)
+    count = min(total, max(1, limit))
+    frames = [[float(v) for v in actions[i][ACTION]] for i in range(count)]
+
+    return {
+        "columns": names,
+        "frames": frames,
+        "fps": float(dataset.fps),
+        "totalFrames": total,
+        "truncated": count < total,
+    }
 
 
 METHODS: dict[str, Callable[..., Any]] = {
@@ -1428,9 +1506,11 @@ METHODS: dict[str, Callable[..., Any]] = {
     "motor.setHoming": m_motor_set_homing,
     "motor.torque": m_motor_torque,
     "motor.move": m_motor_move,
+    "motor.moveMany": m_motor_move_many,
     "motor.setup": m_setup_motor,
     "calibration.read": m_calibration_read,
     "calibration.apply": m_calibration_apply,
+    "dataset.episode": m_dataset_episode,
 }
 
 

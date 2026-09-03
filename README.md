@@ -1,9 +1,9 @@
-# LeRobot Control
+# Rebel LeRobot GUI
 
 A cross-platform desktop app (Electron + React) for managing and controlling
 [LeRobot](https://github.com/huggingface/lerobot) SO-100 / SO-101 arms.
 
-Built by the **RebelDot Physical AI department**. MIT licensed — clone it, use
+Built by the **[RebelDot](https://rebeldot.com) Physical AI department**. MIT licensed — clone it, use
 it, change it; keep the copyright notice, and say where it came from.
 
 - Six workflow panels: **Configure**, **3D View**, **Teleoperate**, **Replay**,
@@ -12,6 +12,10 @@ it, change it; keep the copyright notice, and say where it came from.
   window LeRobot actually supports enforced up front.
 - An annotated arm view with live motor positions, and per-motor editing of IDs
   and travel limits straight to EEPROM.
+- A **virtual arm** that needs no hardware, no serial port and no Python: try
+  every panel, fly it from the keyboard, replay a recording onto it.
+- **Keyboard and gamepad teleoperation**: the keys or sticks command where the
+  tool goes and the app solves the joint angles, with no extra dependencies.
 - **Write a motor ID** on a live chain without unplugging the other motors.
 - **Test motion** and **auto-calibration** that drive the arm themselves, with a
   cancellable warning and a Stop button that cannot be dismissed mid-move.
@@ -53,6 +57,11 @@ environment with LeRobot is configured. From there:
 Then open **Configure**, add a follower and a leader, pick their serial ports,
 and calibrate.
 
+To look around before any of that, pick **virtual_arm** in Configure. It is a
+simulated SO-101 follower that is always there: it needs no port, no calibration
+and no Python environment, and it can be flown from the keyboard or a gamepad in
+Teleoperate and replayed onto in Replay.
+
 ## The panels
 
 **Configure** — the annotated arm view. Each of the six motors gets an indicator
@@ -60,6 +69,10 @@ on the render and an information card in the gutter showing its ID, live
 position, travel limits, homing offset and gear ratio. Select a motor to edit its
 ID and limits (written to the motor's EEPROM), run calibration, assign motor IDs
 with the setup wizard, or scan the bus to see which IDs actually answer.
+
+![The Configure panel](assets/screenshots/Screenshot1_config.png)
+
+*The Configure panel — the annotated arm view, with a card per motor and the device form in the gutter.*
 
 Three things here go beyond driving the CLI:
 
@@ -80,15 +93,34 @@ Three things here go beyond driving the CLI:
   previous limits go back. The result can be saved straight to the device's
   LeRobot calibration file.
 
-A device here is a **profile**: name, type, model, serial port, calibration
-folder. The name becomes LeRobot's `--robot.id` / `--teleop.id`, and calibration
+One device is not a profile at all. **virtual_arm** is a simulated SO-101
+follower, offered wherever a follower is and fixed in every respect — the name
+and model are not editable, there is no port to choose, and it starts already
+calibrated, with the tick ranges its URDF's joint limits work out to. Its motors
+travel towards a goal rather than jumping to it, and switching its torque off
+leaves it where it stands, so it behaves like an arm rather than like a slider.
+Nothing about it goes through LeRobot, which is why it works on a fresh install.
+
+With it selected, *Device details* gains a **Controller** — keyboard or gamepad —
+and **Start Control** appears beside the chip in the header. Fly the arm from
+this screen and the motor table and the diagram follow it, without changing tabs.
+<kbd>Esc</kbd> stops control, here and anywhere else the app is driving an arm.
+
+Every other device here is a **profile**: name, type, model, serial port,
+calibration folder. The name becomes LeRobot's `--robot.id` / `--teleop.id`, and calibration
 is stored as `<calibration folder>/<name>.json` — which is exactly how LeRobot
 addresses it, so no copying or syncing is involved. Browsing to an existing
 calibration file fills in both halves.
 
 **3D View** — the selected follower's own model, standing on a surface, posed
 from what its motors are reporting. Connect the arm and it follows every reading;
-without one it sits at the pose its calibration file describes.
+without one it sits at the pose its calibration file describes. With the virtual
+arm selected it also gets a **Controller** and a **Start Control** button, which
+is the easiest place to learn the keys: what you press moves the thing on screen.
+
+![The 3D View panel](assets/screenshots/Screenshot2_3dview.png)
+
+*The 3D View panel — the follower's own model, posed from the motor readings, with the joint table beside it.*
 
 The scene is built offline in Blender from the URDF and STL parts in
 `assets/simulation` and shipped as a glTF binary, so the app only loads a model
@@ -108,23 +140,68 @@ without ever measuring where it stops, so its zero is wherever the wrist was
 during calibration, and the URDF's limits for it describe cable length rather
 than anything the encoder knows.
 
-**Teleoperate** — drive a follower from a leader, single or bimanual, optionally
-with cameras and the Rerun dashboard. Turning on *Record* switches the run from
-`lerobot-teleoperate` to `lerobot-record`. While recording, click the output pane
-and use <kbd>→</kbd>/<kbd>n</kbd> to keep an episode, <kbd>←</kbd>/<kbd>r</kbd>
-to redo it, <kbd>Esc</kbd>/<kbd>q</kbd> to finish.
+**Teleoperate** — drive a follower three ways.
+
+- **Leader arm**, single or bimanual, optionally with cameras and the Rerun
+  dashboard: this is `lerobot-teleoperate`, and turning on *Record* switches the
+  run to `lerobot-record`. While recording, click the output pane and use
+  <kbd>→</kbd>/<kbd>n</kbd> to keep an episode, <kbd>←</kbd>/<kbd>r</kbd> to redo
+  it, <kbd>Esc</kbd>/<kbd>q</kbd> to finish.
+- **Keyboard** — <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> and
+  <kbd>R</kbd>/<kbd>F</kbd> fly the tool around, <kbd>I</kbd><kbd>J</kbd><kbd>K</kbd><kbd>L</kbd>
+  and <kbd>U</kbd>/<kbd>O</kbd> turn it, <kbd>,</kbd>/<kbd>.</kbd> work the jaws.
+  Hold <kbd>Shift</kbd> for a quarter speed, press <kbd>0</kbd> to return to the
+  middle of every range.
+- **Gamepad** — left stick and triggers for position, right stick and d-pad for
+  orientation, bumpers for the jaws. Read through the browser's own Gamepad API,
+  so any controller the OS recognises works with nothing to install.
+
+![The Teleoperate panel](assets/screenshots/Screenshot3_teleop.png)
+
+*The Teleoperate panel — leader, keyboard or gamepad, with the command it will run and its live output.*
+
+<kbd>Esc</kbd> gives up control, in this panel and in the two below that offer
+it.
+
+The last two command the tool rather than the joints: six axes for where it is
+and which way it points, plus the jaws. The arm has five joints below the
+gripper, so holding an orientation *and* hitting a position is generally
+impossible — the solver trades a radian of orientation against two centimetres of
+position, which keeps the translation keys tracking to well under a millimetre
+and gives the wrist up when the two conflict. The panel shows the tool's pose,
+how far the last solve fell short, and which joints are against a stop. The arm's
+own model is shown alongside, following the positions it actually reports.
+
+Both work on a real follower and on the virtual one. A real leader can also drive
+the virtual follower, which is a way to check a leader arm and its calibration
+with nothing else plugged in.
 
 **Replay** — play a recorded episode back on an arm. LeRobot addresses datasets
 by `repo_id` rather than path, so the panel takes a dataset folder, derives the
-id, and reads `meta/info.json` to offer a real episode list.
+id, and reads `meta/info.json` to offer a real episode list. On a real follower
+this is `lerobot-replay`; on the virtual one the app steps through the episode
+itself, with start/pause/stop and a frame counter, and shows the model following
+it.
+
+![The Replay panel](assets/screenshots/Screenshot4_replay.png)
+
+*The Replay panel — a dataset folder, the episode list read from `meta/info.json`, and the arm to play it on.*
 
 **Infer** — run a trained policy. The command shape follows the installed
 LeRobot: newer builds use `lerobot-rollout`, older ones drive the policy through
 `lerobot-record` (which additionally requires an `eval_` dataset prefix, added
 automatically). The panel states which path it is taking.
 
+![The Infer panel](assets/screenshots/Screenshot5_infer.png)
+
+*The Infer panel — a policy checkpoint or Hugging Face model id, the task, and the cameras the policy expects.*
+
 **Settings** — appearance, Python discovery, venv creation, LeRobot install,
 installed package list, and the default calibration/dataset folders.
+
+![The Settings panel](assets/screenshots/Screenshot6_settings.png)
+
+*The Settings panel — theme, Python interpreter, environment, LeRobot install, and what the environment actually has.*
 
 **About** — who made this, and what it is for.
 
@@ -133,6 +210,14 @@ the process output into a real terminal pane. Each two-column panel has a
 draggable divider that remembers its width per panel, and the whole app follows a
 light or dark theme — set explicitly, or left on *system* to follow the OS while
 it runs.
+
+Each panel also keeps its own selections while you are on another tab — the arm,
+the controller, the dataset, the episode, the policy. What was *read* from a
+device is not kept: a snapshot, a stream, a console are re-established on the way
+back in, and control of an arm is never left running by a panel you have left.
+The list of what survives is one declaration in
+[src/renderer/lib/panel-selections.ts](src/renderer/lib/panel-selections.ts);
+anything absent from it is deliberately transient.
 
 ## How it talks to LeRobot
 
@@ -149,9 +234,20 @@ Two channels, deliberately separate:
 
 - **A Python sidecar** (`resources/bridge/lerobot_gui_bridge.py`) for what the
   CLI cannot express: live motor positions, per-motor ID/limit writes, torque
-  control, serial-port and camera enumeration. It runs inside the configured
-  venv and speaks newline-delimited JSON-RPC over stdio — stdout is protocol
-  only, all logging goes to stderr.
+  control, serial-port and camera enumeration, and reading one episode's actions
+  out of a dataset. It runs inside the configured venv and speaks
+  newline-delimited JSON-RPC over stdio — stdout is protocol only, all logging
+  goes to stderr.
+
+Three things the app drives itself, because no LeRobot command can:
+keyboard and gamepad teleoperation, teleoperating the virtual arm, and replaying
+onto it. `lerobot-teleoperate` has no device for a simulated arm, and its
+keyboard and gamepad teleoperators emit three-axis position deltas that nothing
+in the shipped release converts into joint angles. So the forward and inverse
+kinematics are in the app, in [src/shared/kinematics.ts](src/shared/kinematics.ts):
+a few hundred lines of dependency-free arithmetic over the same URDFs the 3D view
+is built from, rather than LeRobot's own `RobotKinematics`, which needs a
+compiled solver (`placo`) that no lerobot extra installs.
 
 The app probes the environment rather than assuming a LeRobot version, because
 the CLI surface has changed across releases (`lerobot-rollout` is new; the
@@ -291,7 +387,9 @@ the machine.
 
 ```
 resources/bridge/lerobot_gui_bridge.py   Python sidecar (JSON-RPC over stdio)
-src/shared/          motor tables, IPC types, diagram geometry, joint mapping
+src/shared/          motor tables, IPC types, diagram geometry, joint mapping,
+                     forward/inverse kinematics, the control mappings, the
+                     virtual arm's identity
 src/main/            Electron main: IPC, process runner, bridge client, env setup
 src/preload/         the typed contextBridge API
 src/renderer/        React UI — components/ and panels/
@@ -312,6 +410,12 @@ the scene manifest each model is built with: it names the glTF node and rotation
 axis for every joint, so [src/shared/sim.ts](src/shared/sim.ts) never has to know
 what the rig looks like.
 
+What each key and stick does is a table in
+[src/shared/teleop-input.ts](src/shared/teleop-input.ts), and the on-screen
+legend is rendered from it — a remapped key cannot end up documented wrong. The
+kinematic chain is read from the same URDF the 3D scene was built from, so
+neither view can drift from the other.
+
 ## About
 
 **LeRobot Control** was built to make LeRobot arms quicker to get running and
@@ -319,7 +423,7 @@ easier to live with: one place to prepare the Python environment, give each arm
 an identity, calibrate it, and then teleoperate, record, replay and run policies
 — without assembling command lines by hand.
 
-- **Created by** RebelDot — Physical AI department
+- **Created by** [RebelDot](https://rebeldot.com) — Physical AI department
 - **Contributors** Andrei Brumboiu &lt;andrei.brumboiu@rebeldot.com&gt;
 - **Built** August – September 2026
 - **Built with** [Claude Code](https://claude.com/claude-code), Anthropic's
@@ -343,3 +447,11 @@ Some things in this repository are not ours to license: the SO-ARM100 URDFs and
 meshes under `assets/simulation/`, LeRobot itself, and the RebelDot wordmarks
 under `assets/logo/`. [NOTICE](NOTICE) says which is which — read it before
 publishing a build, and swap the wordmarks for your own.
+
+---
+
+<p align="center">
+  <a href="https://rebeldot.com">
+    <img src="assets/logo/rebeldot-logo-tagline-white-yellow@3x.png" alt="RebelDot — Physical AI department" width="320">
+  </a>
+</p>

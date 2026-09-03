@@ -18,6 +18,7 @@ import {
   Toggle
 } from '../components/ui'
 import { api } from '../lib/api'
+import { useSticky } from '../lib/use-sticky'
 import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '../store/useAppStore'
 
@@ -39,7 +40,9 @@ export function InferPanel(): ReactNode {
     setActiveRun: s.setActiveRun
   })))
 
-  const [opts, setOpts] = useState<InferOptions>({
+  // Kept while another tab is open: the arm, the policy and the task are a
+  // setup, not a reading.
+  const [opts, setOpts] = useSticky('infer.options', () => ({
     robotUid: null,
     policyPath: '',
     task: '',
@@ -48,7 +51,7 @@ export function InferPanel(): ReactNode {
     displayData: false,
     evalRepoId: 'eval_policy_run',
     evalDatasetRoot: settings?.defaultDatasetRoot ?? ''
-  })
+  }))
   const [preview, setPreview] = useState<string | null>(null)
   const [previewError, setPreviewError] = useState<string | null>(null)
   const [startError, setStartError] = useState<string | null>(null)
