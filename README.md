@@ -1,3 +1,10 @@
+
+<p align="center">
+  <a href="https://rebeldot.com">
+    <img src="assets/logo/rebeldot-logo-tagline-white-yellow@3x.png" alt="RebelDot — Physical AI department" width="320">
+  </a>
+</p>
+
 # Rebel LeRobot GUI
 
 A cross-platform desktop app (Electron + React) for managing and controlling
