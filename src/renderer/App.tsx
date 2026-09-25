@@ -5,6 +5,7 @@ import { api } from './lib/api'
 import { useResolvedTheme } from './lib/theme'
 import { AboutPanel } from './panels/AboutPanel'
 import { ConfigurePanel } from './panels/ConfigurePanel'
+import { DemosPanel } from './panels/DemosPanel'
 import { InferPanel } from './panels/InferPanel'
 import { ReplayPanel } from './panels/ReplayPanel'
 import { SettingsPanel } from './panels/SettingsPanel'
@@ -19,7 +20,8 @@ const TABS: { id: PanelId; label: string; hint: string }[] = [
   { id: 'view3d', label: '3D View', hint: 'A follower’s own model, posed from its motor readings' },
   { id: 'teleoperate', label: 'Teleoperate', hint: 'Drive a follower from a leader, and record' },
   { id: 'replay', label: 'Replay', hint: 'Play a recorded episode back on the arm' },
-  { id: 'infer', label: 'Infer', hint: 'Run a trained policy on the arm' }
+  { id: 'infer', label: 'Infer', hint: 'Run a trained policy on the arm' },
+  { id: 'demos', label: 'Demos', hint: 'Saved scripts, one card each' }
 ]
 
 const SETTINGS_TAB = {
@@ -202,6 +204,7 @@ export function App(): ReactNode {
         {panel === 'teleoperate' && <TeleoperatePanel />}
         {panel === 'replay' && <ReplayPanel />}
         {panel === 'infer' && <InferPanel />}
+        {panel === 'demos' && <DemosPanel />}
         {panel === 'settings' && <SettingsPanel />}
         {panel === 'about' && <AboutPanel />}
       </main>

@@ -6,6 +6,7 @@ import { bridge } from './bridge/bridge-client'
 import { registerIpc } from './ipc'
 import { assetsDir, defaultCalibrationDir, isMac } from './paths'
 import { runner } from './runner/process-runner'
+import { isSafeName, thumbnailsDir } from './stores/demos'
 import { settings } from './stores/settings'
 
 const isDev = !app.isPackaged
@@ -82,15 +83,44 @@ function registerAssetProtocol(): void {
   })
 }
 
+/**
+ * `thumb://` serves demo card images out of the app's own data directory.
+ *
+ * Separate from `arm://` because it reads somewhere else entirely: `arm://` is
+ * read-only app content, while this is user data the app copies in at runtime.
+ * Keeping the two scopes apart means a bug in one cannot reach the other's
+ * directory.
+ */
+function registerThumbnailProtocol(): void {
+  protocol.handle('thumb', async (request) => {
+    const url = new URL(request.url)
+    const name = decodeURIComponent(url.host + (url.pathname === '/' ? '' : url.pathname))
+    // Only ever names this app generated (`<uid>-<stamp>.<ext>`), so anything
+    // with a separator or a dot-dot in it is a bug or an edited demos.json.
+    if (!isSafeName(name)) {
+      console.error(`[thumb] rejected '${request.url}'`)
+      return new Response('Invalid thumbnail name', { status: 400 })
+    }
+    const file = join(thumbnailsDir(), name)
+    if (!existsSync(file)) return new Response('Not found', { status: 404 })
+    return net.fetch(pathToFileURL(file).toString())
+  })
+}
+
 protocol.registerSchemesAsPrivileged([
   {
     scheme: 'arm',
     privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true }
+  },
+  {
+    scheme: 'thumb',
+    privileges: { standard: true, secure: true, supportFetchAPI: true }
   }
 ])
 
 app.whenReady().then(() => {
   registerAssetProtocol()
+  registerThumbnailProtocol()
   registerIpc()
 
   // Make the default calibration directory real so the file dialogs can open it

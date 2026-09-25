@@ -1,4 +1,5 @@
 import type { ArmModel, CameraType, DeviceRole } from './devices'
+import type { MotorIdentity, MotorTelemetry } from './feetech'
 
 /* ------------------------------------------------------------------ *
  * Device profiles                                                     *
@@ -166,6 +167,16 @@ export interface MotorState {
   gearRatio: string | null
   /** True when the motor answered a ping on the bus. */
   online: boolean
+  /**
+   * Live readings from the motor's SRAM. Null unless the arm is connected —
+   * a calibration file records none of this.
+   */
+  telemetry?: MotorTelemetry | null
+  /**
+   * What the motor says it is, as opposed to `model`, which is assumed from the
+   * device table. Null unless the arm is connected.
+   */
+  identity?: MotorIdentity | null
 }
 
 export type BusSource = 'live' | 'calibration-file' | 'defaults'
@@ -340,6 +351,7 @@ export type CalibrationFile = Record<string, CalibrationEntry>
  * ------------------------------------------------------------------ */
 
 export type RunKind =
+  | 'demo'
   | 'calibrate'
   | 'setup-motors'
   | 'teleoperate'

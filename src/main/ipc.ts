@@ -23,6 +23,8 @@ import type {
   SerialPortInfo,
   TeleoperateOptions
 } from '@shared/types'
+import type { Demo, DemoDraft } from '@shared/demos'
+import { THUMBNAIL_EXTENSIONS } from '@shared/demos'
 import { drivenInApp } from '@shared/teleop-input'
 import { isVirtual } from '@shared/virtual'
 import { BrowserWindow, dialog, ipcMain, shell } from 'electron'
@@ -38,6 +40,16 @@ import {
   writeCalibrationFile
 } from './calibration'
 import { discoverLocalDatasets, isDatasetRoot, readDatasetMeta } from './datasets'
+import {
+  deleteDemo,
+  getDemo,
+  listDemos,
+  removeThumbnail,
+  saveThumbnail,
+  upsertDemo,
+  writeScript
+} from './stores/demos'
+import { buildDemoCommand, demoShell, scriptPrologue } from './runner/demo-command'
 import { defaultCalibrationDir, isLinux, venvExists, venvScript } from './paths'
 import { listPackages, probeCapabilities } from './python/capabilities'
 import { discoverPythons, inspectPython, inspectVenv, uvPath } from './python/discover'
@@ -69,6 +81,16 @@ import {
   upsertProfile
 } from './stores/settings'
 import { virtualBus } from './virtual-bus'
+
+/**
+ * Which demo each demo run belongs to.
+ *
+ * Kept beside the runner rather than on `RunInfo`, which every other kind of run
+ * shares and none of the rest would use. Runs only live for as long as the app
+ * does, so this never needs persisting; `demos:running` hands the mapping to the
+ * renderer when a panel needs to re-attach to a demo already under way.
+ */
+const demoRunOwners = new Map<string, string>()
 
 let capsCache: LerobotCapabilities | null = null
 /** Resolved `uv` path, refreshed whenever the renderer asks for it. */
@@ -233,6 +255,83 @@ export function registerIpc(): void {
   })
 
   handle('profiles:delete', (uid: string): DeviceProfile[] => deleteProfile(uid))
+
+  /* -- demos -------------------------------------------------------- */
+
+  handle('demos:running', (): Record<string, string> => {
+    const out: Record<string, string> = {}
+    for (const run of runner.list()) {
+      const uid = demoRunOwners.get(run.runId)
+      if (uid && (run.status === 'running' || run.status === 'starting' || run.status === 'paused')) {
+        out[uid] = run.runId
+      }
+    }
+    return out
+  })
+
+  handle('demos:list', (): Demo[] => listDemos())
+
+  handle('demos:save', (draft: DemoDraft): Demo[] => upsertDemo(draft))
+
+  handle('demos:delete', (uid: string): Demo[] => {
+    // A demo that is still running would keep writing into a console the panel
+    // is about to drop, so stop it first. Deleting is the user's decision; the
+    // run is just bookkeeping that has to follow it.
+    for (const run of runner.list()) {
+      if (run.kind === 'demo' && run.status === 'running' && demoRunOwners.get(run.runId) === uid) {
+        runner.stop(run.runId)
+      }
+    }
+    return deleteDemo(uid)
+  })
+
+  handle('demos:pickThumbnail', async (uid: string): Promise<string | null> => {
+    const res = await dialog.showOpenDialog({
+      title: 'Choose a thumbnail',
+      filters: [{ name: 'Images', extensions: [...THUMBNAIL_EXTENSIONS] }],
+      properties: ['openFile']
+    })
+    if (res.canceled || !res.filePaths[0]) return null
+    return saveThumbnail(uid, res.filePaths[0])
+  })
+
+  handle('demos:clearThumbnail', (name: string): void => removeThumbnail(name))
+
+  /**
+   * Start a demo.
+   *
+   * The script is written out fresh every time, so an edit made since the last
+   * run is what runs. Only one instance of a demo is allowed at a time: the
+   * modal has a single console and a single stop button, and two copies of a
+   * script driving the same arm is never what was meant.
+   */
+  handle('demos:start', (uid: string): RunInfo => {
+    const demo = getDemo(uid)
+    if (!demo) throw new Error('That demo no longer exists.')
+
+    const already = runner
+      .list()
+      .find(
+        (r) =>
+          r.kind === 'demo' &&
+          demoRunOwners.get(r.runId) === uid &&
+          (r.status === 'running' || r.status === 'starting' || r.status === 'paused')
+      )
+    if (already) throw new Error(`'${demo.name}' is already running.`)
+
+    const shell = demoShell()
+    const scriptPath = writeScript(uid, `${scriptPrologue(shell)}${demo.script}`, shell.extension)
+    const command = buildDemoCommand({
+      demo,
+      devices: listProfiles(),
+      scriptPath,
+      venvPath: settings().get().venvPath,
+      shell
+    })
+    const info = runner.start('demo', command)
+    demoRunOwners.set(info.runId, uid)
+    return info
+  })
 
   /* -- dialogs ------------------------------------------------------ */
 
@@ -669,6 +768,10 @@ function buildCommand(kind: RunKind, payload: unknown): CommandSpec {
     }
     case 'pip-list':
       return buildPipListCommand(requireVenv())
+    case 'demo':
+      // Demos carry their own script rather than a built argv, so they are
+      // started through `demos:start`. Listed here so this stays exhaustive.
+      throw new Error('Demos are started with demos:start, not run:start.')
     default: {
       const exhaustive: never = kind
       throw new Error(`Unsupported run kind: ${String(exhaustive)}`)

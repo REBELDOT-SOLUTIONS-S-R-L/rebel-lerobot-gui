@@ -1,3 +1,4 @@
+import type { Demo, DemoDraft } from '@shared/demos'
 import type {
   AppInfo,
   AppSettings,
@@ -16,6 +17,7 @@ export type PanelId =
   | 'teleoperate'
   | 'replay'
   | 'infer'
+  | 'demos'
   | 'settings'
   | 'about'
 
@@ -27,6 +29,14 @@ interface AppState {
   capsError: string | null
   capsLoading: boolean
   profiles: DeviceProfile[]
+  demos: Demo[]
+  /**
+   * Demo uid -> runId, for the demos currently under way.
+   *
+   * A demo's console has to survive its modal being closed and reopened, so the
+   * link between a demo and its run lives here rather than in the modal.
+   */
+  demoRuns: Record<string, string>
   ports: SerialPortInfo[]
   portsError: string | null
   portsLoading: boolean
@@ -50,6 +60,10 @@ interface AppState {
   refreshProfiles: () => Promise<void>
   saveProfile: (profile: DeviceProfile) => Promise<string | null>
   removeProfile: (uid: string) => Promise<void>
+  refreshDemos: () => Promise<void>
+  saveDemo: (demo: DemoDraft) => Promise<string | null>
+  removeDemo: (uid: string) => Promise<void>
+  startDemo: (uid: string) => Promise<string | null>
   refreshPorts: () => Promise<void>
   setActiveRun: (runId: string | null) => void
   setSticky: <K extends keyof PanelSelections>(key: K, value: PanelSelections[K]) => void
@@ -65,6 +79,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   capsError: null,
   capsLoading: false,
   profiles: [],
+  demos: [],
+  demoRuns: {},
   ports: [],
   portsError: null,
   portsLoading: false,
@@ -75,15 +91,21 @@ export const useAppStore = create<AppState>((set, get) => ({
   setPanel: (panel) => set({ panel }),
 
   bootstrap: async () => {
-    const [info, settings, profiles] = await Promise.all([
+    const [info, settings, profiles, demos, demoRuns] = await Promise.all([
       attempt(api.app.info()),
       attempt(api.settings.get()),
-      attempt(api.profiles.list())
+      attempt(api.profiles.list()),
+      attempt(api.demos.list()),
+      attempt(api.demos.running())
     ])
     set({
       appInfo: info.value ?? null,
       settings: settings.value ?? null,
-      profiles: profiles.value ?? []
+      profiles: profiles.value ?? [],
+      demos: demos.value ?? [],
+      // A dev reload leaves the main process — and any demo it started — alive,
+      // so pick those back up rather than showing them as stopped.
+      demoRuns: demoRuns.value ?? {}
     })
     // Land on Settings when there is no environment yet — nothing else can work.
     if (!settings.value?.venvPath) set({ panel: 'settings' })
@@ -141,6 +163,42 @@ export const useAppStore = create<AppState>((set, get) => ({
     // Deleting a profile is the only thing that can make a selection dangle, so
     // it is the one place that has to let go of it.
     set((state) => ({ profiles, sticky: forgetDevice(state.sticky, uid) }))
+  },
+
+  refreshDemos: async () => {
+    const res = await attempt(api.demos.list())
+    if (res.value) set({ demos: res.value })
+  },
+
+  saveDemo: async (demo) => {
+    const res = await attempt(api.demos.save(demo))
+    if (res.value) {
+      set({ demos: res.value })
+      return null
+    }
+    return res.error ?? 'Could not save the demo.'
+  },
+
+  removeDemo: async (uid) => {
+    const res = await attempt(api.demos.remove(uid))
+    if (!res.value) return
+    // Let go of the run too: the main process stops it as part of the delete,
+    // and leaving the id here would point at a run nothing can reach.
+    const demoRuns = { ...get().demoRuns }
+    delete demoRuns[uid]
+    set({ demos: res.value, demoRuns })
+  },
+
+  startDemo: async (uid) => {
+    const res = await attempt(api.demos.start(uid))
+    if (!res.value) return res.error ?? 'Could not start the demo.'
+    const info = res.value
+    set((state) => ({
+      demoRuns: { ...state.demoRuns, [uid]: info.runId },
+      runs: [...state.runs.filter((r) => r.runId !== info.runId), info],
+      activeRunId: info.runId
+    }))
+    return null
   },
 
   refreshPorts: async () => {

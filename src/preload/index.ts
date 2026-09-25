@@ -23,6 +23,7 @@ import type {
   ScanResult,
   SerialPortInfo
 } from '@shared/types'
+import type { Demo, DemoDraft } from '@shared/demos'
 import { contextBridge, ipcRenderer } from 'electron'
 
 type Unsubscribe = () => void
@@ -67,6 +68,18 @@ const api = {
     list: () => invoke<DeviceProfile[]>('profiles:list'),
     save: (profile: DeviceProfile) => invoke<DeviceProfile[]>('profiles:save', profile),
     remove: (uid: string) => invoke<DeviceProfile[]>('profiles:delete', uid)
+  },
+
+  demos: {
+    list: () => invoke<Demo[]>('demos:list'),
+    save: (demo: DemoDraft) => invoke<Demo[]>('demos:save', demo),
+    remove: (uid: string) => invoke<Demo[]>('demos:delete', uid),
+    start: (uid: string) => invoke<RunInfo>('demos:start', uid),
+    /** Demo uid -> runId, for re-attaching to a demo already under way. */
+    running: () => invoke<Record<string, string>>('demos:running'),
+    /** Opens a file dialog; resolves to the stored filename, or null if cancelled. */
+    pickThumbnail: (uid: string) => invoke<string | null>('demos:pickThumbnail', uid),
+    clearThumbnail: (name: string) => invoke<void>('demos:clearThumbnail', name)
   },
 
   dialog: {

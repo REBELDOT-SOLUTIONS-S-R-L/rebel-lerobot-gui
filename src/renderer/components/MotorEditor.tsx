@@ -1,4 +1,18 @@
 import { MAX_MOTOR_ID, STS3215_MAX_TICK, checkMotorIdWrite } from '@shared/devices'
+import {
+  decodeStatus,
+  formatCurrent,
+  formatFirmware,
+  formatLoad,
+  formatModelNumber,
+  formatTemperature,
+  formatVelocity,
+  formatVoltage,
+  modelMismatch,
+  temperatureTone,
+  voltageTone,
+  type TelemetryTone
+} from '@shared/feetech'
 import type { BusSnapshot, MotorState } from '@shared/types'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { api } from '../lib/api'
@@ -100,6 +114,17 @@ export function MotorEditor({
     (minDraft !== '' && minNumber !== motor.rangeMin) || (maxDraft !== '' && maxNumber !== motor.rangeMax)
 
   const simulated = snapshot.simulated === true
+
+  /**
+   * Live readings only mean anything while the arm is answering. The virtual arm
+   * has neither a thermometer nor an EEPROM, so it reports none of this and the
+   * blocks below simply do not render for it.
+   */
+  const telemetry = live && motor.online ? (motor.telemetry ?? null) : null
+  const identity = live && motor.online ? (motor.identity ?? null) : null
+  const faults = telemetry?.status != null ? decodeStatus(telemetry.status) : []
+  const wrongModel = modelMismatch(identity?.modelNumber ?? null, motor.model)
+
   const idBlocked =
     simulated ||
     idDraft === '' ||
@@ -187,7 +212,20 @@ export function MotorEditor({
         <dt className="text-ink-600">Homing offset</dt>
         <dd className="font-mono tabular-nums text-ink-300">{motor.homingOffset ?? '—'}</dd>
         <dt className="text-ink-600">Model</dt>
-        <dd className="font-mono text-ink-300">{motor.model}</dd>
+        <dd className="font-mono text-ink-300">
+          {motor.model}
+          {identity && identity.modelNumber !== null && (
+            <span className="ml-1 text-ink-600">— reports {formatModelNumber(identity.modelNumber)}</span>
+          )}
+        </dd>
+        {identity && (identity.firmwareMajor !== null || identity.firmwareMinor !== null) && (
+          <>
+            <dt className="text-ink-600">Firmware</dt>
+            <dd className="font-mono tabular-nums text-ink-300">
+              {formatFirmware(identity.firmwareMajor, identity.firmwareMinor)}
+            </dd>
+          </>
+        )}
         {motor.gearRatio && (
           <>
             <dt className="text-ink-600">Gear ratio</dt>
@@ -195,6 +233,42 @@ export function MotorEditor({
           </>
         )}
       </dl>
+
+      {wrongModel && (
+        <Notice tone="warn">
+          This motor reports {formatModelNumber(identity?.modelNumber ?? null)}, but the arm is
+          configured for {motor.model}. Encoder resolution and the control table differ between
+          Feetech models, so positions and limits may not mean what the app assumes.
+        </Notice>
+      )}
+
+      {telemetry && (
+        <div className="rounded-lg border border-shell-700 bg-shell-800/40 px-3 py-2.5">
+          <div className="mb-1.5 flex items-center justify-between">
+            <h4 className="text-xs font-semibold text-ink-300">Live readings</h4>
+            {telemetry.moving !== null && (
+              <Badge tone={telemetry.moving ? 'accent' : 'neutral'}>
+                {telemetry.moving ? 'moving' : 'at rest'}
+              </Badge>
+            )}
+          </div>
+          <dl className="grid grid-cols-[auto_1fr_auto_1fr] gap-x-3 gap-y-1 text-xs">
+            <Reading label="Temp" value={formatTemperature(telemetry.temperature)} tone={temperatureTone(telemetry.temperature)} />
+            <Reading label="Voltage" value={formatVoltage(telemetry.voltage)} tone={voltageTone(telemetry.voltage)} />
+            <Reading label="Load" value={formatLoad(telemetry.load)} />
+            <Reading label="Current" value={formatCurrent(telemetry.current)} />
+            <Reading label="Speed" value={formatVelocity(telemetry.velocity)} />
+          </dl>
+        </div>
+      )}
+
+      {faults.length > 0 && (
+        <Notice tone="error">
+          The motor is reporting {faults.length === 1 ? 'a fault' : 'faults'}: {faults.join(', ')}.
+          A latched fault usually means the joint cut its own torque — clear the cause, then power
+          cycle the arm.
+        </Notice>
+      )}
 
       {!live && (
         <Notice tone="warn">
@@ -388,5 +462,30 @@ export function MotorEditor({
         </Notice>
       )}
     </div>
+  )
+}
+
+/**
+ * One live reading, as a label/value pair in the four-column grid.
+ *
+ * The tone is advisory: it colours a figure that is worth a second look, and
+ * nothing acts on it. `ok` stays the same grey as every other reading so that a
+ * healthy arm shows no colour at all.
+ */
+function Reading({
+  label,
+  value,
+  tone = 'ok'
+}: {
+  label: string
+  value: string
+  tone?: TelemetryTone
+}): ReactNode {
+  const tones = { ok: 'text-ink-300', warn: 'text-warn-400', error: 'text-danger-400' }
+  return (
+    <>
+      <dt className="text-ink-600">{label}</dt>
+      <dd className={`font-mono tabular-nums ${tones[tone]}`}>{value}</dd>
+    </>
   )
 }

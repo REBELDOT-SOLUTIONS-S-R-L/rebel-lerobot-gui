@@ -7,6 +7,7 @@
  */
 const { app, BrowserWindow, ipcMain } = require('electron')
 const path = require('node:path')
+const fs = require('node:fs')
 
 /** Kept in step with `VIRTUAL_UID` in src/shared/virtual.ts. */
 const VIRTUAL_UID = 'virtual-arm'
@@ -163,6 +164,64 @@ app.whenReady().then(async () => {
     record('datasets:discover responds', discovered.ok === true, `found=${(discovered.value || []).length}`)
   } catch (err) {
     record('datasets:discover responds', false, err.message)
+  }
+
+  // --- demos ---------------------------------------------------------------
+  // A demo is created, started for real and cleaned up: it is the one feature
+  // that spawns a shell, so the round trip is worth exercising headlessly.
+  try {
+    const listed = await callIpc('demos:list')
+    record('demos:list responds', listed.ok === true, `count=${(listed.value || []).length}`)
+
+    const uid = `d-smoke-${Date.now().toString(36)}`
+    const saved = await callIpc('demos:save', {
+      uid,
+      name: `Smoke ${uid}`,
+      deviceUids: [VIRTUAL_UID],
+      script: 'echo "demo-smoke-ok"',
+      description: 'Created by the smoke test.',
+      thumbnail: null
+    })
+    record('demos:save stores a demo', saved.ok === true, saved.error)
+
+    const nameless = await callIpc('demos:save', {
+      uid: `${uid}-bad`,
+      name: '   ',
+      deviceUids: [],
+      script: 'echo nope',
+      description: '',
+      thumbnail: null
+    })
+    record(
+      'demos:save refuses a demo with no name',
+      nameless.ok === false && typeof nameless.error === 'string',
+      nameless.error
+    )
+
+    const started = await callIpc('demos:start', uid)
+    record('demos:start spawns the script', started.ok === true, started.error || started.value?.runId)
+
+    if (started.ok) {
+      const runId = started.value.runId
+      // The script is a single echo, so it is finished almost immediately; poll
+      // rather than sleeping a fixed amount, which would be slower and flakier.
+      let status = null
+      for (let i = 0; i < 40 && status !== 'exited' && status !== 'failed'; i += 1) {
+        await new Promise((r) => setTimeout(r, 50))
+        status = (await callIpc('run:get', runId)).value?.status ?? null
+      }
+      const log = (await callIpc('run:log', runId)).value || ''
+      record('a demo runs to completion', status === 'exited', `status=${status}`)
+      record('demo output reaches the console log', log.includes('demo-smoke-ok'), log.trim().slice(0, 80))
+    }
+
+    const deleted = await callIpc('demos:delete', uid)
+    record(
+      'demos:delete removes it again',
+      deleted.ok === true && !(deleted.value || []).some((d) => d.uid === uid)
+    )
+  } catch (err) {
+    record('demo checks', false, err.message)
   }
 
   // A command preview must fail *gracefully* with no environment configured,
@@ -328,11 +387,12 @@ app.whenReady().then(async () => {
       record('preload bridge exposed', probe.hasApi === true, probe.apiKeys.join(','))
       record('renderer mounted', probe.title === 'LeRobot Control', `title=${probe.title}`)
       record(
-        'five workflow tabs in the nav',
-        probe.tabs.length === 5 &&
+        'six workflow tabs in the nav',
+        probe.tabs.length === 6 &&
           probe.tabs.includes('Configure') &&
           probe.tabs.includes('3D View') &&
-          probe.tabs.includes('Infer'),
+          probe.tabs.includes('Infer') &&
+          probe.tabs.includes('Demos'),
         probe.tabs.join(' | ')
       )
       record(
@@ -373,6 +433,33 @@ app.whenReady().then(async () => {
         }
         return out
       })()`)
+      // A card thumbnail is an <img src="thumb://...">, so it is governed by the
+      // page's img-src CSP as well as by the protocol handler. A CSP that
+      // forgets the scheme blocks the image with nothing but a console warning,
+      // which is exactly the failure this catches.
+      try {
+        const thumbDir = path.join(app.getPath('userData'), 'demo-thumbnails')
+        fs.mkdirSync(thumbDir, { recursive: true })
+        const thumbName = `d-smoke-thumb-${Date.now().toString(36)}.png`
+        fs.copyFileSync(path.join(__dirname, '..', 'assets', 'so101-robot.png'), path.join(thumbDir, thumbName))
+
+        const loaded = await windows[0].webContents.executeJavaScript(`(() => new Promise((resolve) => {
+          const img = new Image()
+          img.onload = () => resolve({ ok: true, w: img.naturalWidth, h: img.naturalHeight })
+          img.onerror = () => resolve({ ok: false })
+          setTimeout(() => resolve({ ok: false, timedOut: true }), 4000)
+          img.src = 'thumb://${thumbName}'
+        }))()`)
+        record(
+          'thumb:// thumbnails load in the renderer',
+          loaded.ok === true && loaded.w > 0,
+          loaded.ok ? `${loaded.w}x${loaded.h}` : `blocked${loaded.timedOut ? ' (timed out)' : ''}`
+        )
+        fs.rmSync(path.join(thumbDir, thumbName), { force: true })
+      } catch (err) {
+        record('thumb:// thumbnails load in the renderer', false, err.message)
+      }
+
       const sceneSizes = Object.values(scenes)
       record(
         'arm:// serves the 3D scenes and URDFs to fetch()',

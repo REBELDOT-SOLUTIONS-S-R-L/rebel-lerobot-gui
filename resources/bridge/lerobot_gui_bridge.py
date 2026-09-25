@@ -280,6 +280,20 @@ class BusSession:
 
     # -- reads -------------------------------------------------------------
 
+    def _read_optional(self, bus, register: str, motor: str) -> int | None:
+        """
+        Read one register, tolerating a failure.
+
+        Used for the readings that are nice to have rather than load-bearing: a
+        motor whose position and limits came back fine should still be reported
+        as online if its thermometer did not answer, and an older firmware may
+        not carry every register in the table.
+        """
+        try:
+            return int(bus.read(register, motor, normalize=False))
+        except Exception:  # noqa: BLE001 - an absent extra must not fail the motor
+            return None
+
     def read_state(self) -> dict[str, Any]:
         bus = self.require()
         with self._lock:
@@ -295,6 +309,8 @@ class BusSession:
                     "driveMode": 0,
                     "online": False,
                     "error": None,
+                    "telemetry": None,
+                    "identity": None,
                 }
                 try:
                     entry["position"] = int(bus.read("Present_Position", name, normalize=False))
@@ -304,6 +320,27 @@ class BusSession:
                     entry["online"] = True
                 except Exception as exc:  # noqa: BLE001 - one dead motor must not hide the rest
                     entry["error"] = f"{type(exc).__name__}: {exc}"
+
+                # Only worth the round trips once the motor has proved it answers.
+                # Present_Load and Present_Velocity are sign-magnitude registers,
+                # but MotorsBus.read applies _decode_sign before it applies
+                # normalize, so these arrive already signed.
+                if entry["online"]:
+                    moving = self._read_optional(bus, "Moving", name)
+                    entry["telemetry"] = {
+                        "temperature": self._read_optional(bus, "Present_Temperature", name),
+                        "voltage": self._read_optional(bus, "Present_Voltage", name),
+                        "load": self._read_optional(bus, "Present_Load", name),
+                        "current": self._read_optional(bus, "Present_Current", name),
+                        "velocity": self._read_optional(bus, "Present_Velocity", name),
+                        "moving": None if moving is None else bool(moving),
+                        "status": self._read_optional(bus, "Status", name),
+                    }
+                    entry["identity"] = {
+                        "modelNumber": self._read_optional(bus, "Model_Number", name),
+                        "firmwareMajor": self._read_optional(bus, "Firmware_Major_Version", name),
+                        "firmwareMinor": self._read_optional(bus, "Firmware_Minor_Version", name),
+                    }
                 motors.append(entry)
             return {
                 "port": self.port,
