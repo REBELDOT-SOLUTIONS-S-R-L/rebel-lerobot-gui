@@ -1,4 +1,5 @@
 import { GEAR_RATIOS, SO_ARM_MOTORS } from '@shared/devices'
+import type { MotorIdentity, MotorTelemetry } from '@shared/feetech'
 import type {
   BusSnapshot,
   CalibrationFile,
@@ -125,6 +126,8 @@ export function snapshotFromBridge(
       driveMode: number | null
       online: boolean
       error?: string | null
+      telemetry?: MotorTelemetry | null
+      identity?: MotorIdentity | null
     }[]
   }
 ): BusSnapshot {
@@ -143,7 +146,9 @@ export function snapshotFromBridge(
       driveMode: live?.driveMode ?? null,
       model: spec.model,
       gearRatio: ratios[spec.name] ?? null,
-      online: live?.online ?? false
+      online: live?.online ?? false,
+      telemetry: live?.telemetry ?? null,
+      identity: live?.identity ?? null
     }
   })
   const offline = motors.filter((m) => !m.online).map((m) => m.name)

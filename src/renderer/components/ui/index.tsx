@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { useEffect, useId, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 
 /* ------------------------------------------------------------------ *
  * Layout                                                              *
@@ -149,6 +149,24 @@ export function TextInput(props: React.InputHTMLAttributes<HTMLInputElement>): R
 export function NumberInput(props: React.InputHTMLAttributes<HTMLInputElement>): ReactNode {
   const { className = '', ...rest } = props
   return <input type="number" {...rest} className={`${INPUT_CLASS} font-mono ${className}`} />
+}
+
+/**
+ * Multi-line input. `mono` for anything the user expects to look like a file —
+ * a script's indentation only reads correctly in a fixed-width face.
+ */
+export function TextArea({
+  mono = false,
+  className = '',
+  ...rest
+}: React.TextareaHTMLAttributes<HTMLTextAreaElement> & { mono?: boolean }): ReactNode {
+  return (
+    <textarea
+      {...rest}
+      spellCheck={mono ? false : rest.spellCheck}
+      className={`${INPUT_CLASS} resize-y leading-relaxed ${mono ? 'font-mono text-xs' : ''} ${className}`}
+    />
+  )
 }
 
 export function Select<T extends string | number>({
@@ -422,6 +440,106 @@ export function CommandPreview({
       <pre className="max-h-32 overflow-auto px-3 py-2 font-mono text-[11px] leading-relaxed text-ink-300">
         {command}
       </pre>
+    </div>
+  )
+}
+
+/* ------------------------------------------------------------------ *
+ * Modal                                                               *
+ * ------------------------------------------------------------------ */
+
+/**
+ * A centred dialog over a dimmed backdrop.
+ *
+ * Deliberately not `<dialog showModal>`: the demo console inside one of these is
+ * an xterm instance, and the top layer clips its canvas and steals the
+ * keystrokes the terminal needs. This is a plain overlay with the same
+ * behaviours added back — Escape closes, the backdrop closes, focus moves into
+ * the panel, and the page behind does not scroll.
+ *
+ * `onClose` is what the close affordances call; a caller that must not be
+ * dismissed casually (a run in progress, an unsaved edit) confirms inside it.
+ */
+export function Modal({
+  title,
+  subtitle,
+  onClose,
+  children,
+  footer,
+  size = 'md'
+}: {
+  title: ReactNode
+  subtitle?: ReactNode
+  onClose: () => void
+  children: ReactNode
+  footer?: ReactNode
+  size?: 'md' | 'lg'
+}): ReactNode {
+  const panelRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') {
+        e.stopPropagation()
+        onClose()
+      }
+    }
+    // Capture, so Escape closes the dialog before anything inside it — the
+    // terminal would otherwise swallow the key and forward it to the child.
+    window.addEventListener('keydown', onKey, true)
+    const { overflow } = document.body.style
+    document.body.style.overflow = 'hidden'
+    panelRef.current?.focus()
+    return () => {
+      window.removeEventListener('keydown', onKey, true)
+      document.body.style.overflow = overflow
+    }
+  }, [onClose])
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-6 backdrop-blur-sm"
+      onMouseDown={(e) => {
+        // Only a press that both starts and ends on the backdrop closes, so a
+        // drag that began inside the panel (selecting text) cannot dismiss it.
+        if (e.target === e.currentTarget) onClose()
+      }}
+    >
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        tabIndex={-1}
+        className={`flex max-h-full w-full ${
+          size === 'lg' ? 'max-w-4xl' : 'max-w-2xl'
+        } flex-col overflow-hidden rounded-xl border border-shell-700 bg-shell-900 shadow-2xl outline-none`}
+      >
+        <header className="flex shrink-0 items-start justify-between gap-4 border-b border-shell-700 px-5 py-3.5">
+          <div className="min-w-0">
+            <h2 className="truncate text-sm font-semibold text-ink-100">{title}</h2>
+            {subtitle && <p className="mt-0.5 truncate text-xs text-ink-600">{subtitle}</p>}
+          </div>
+          <button
+            type="button"
+            aria-label="Close"
+            title="Close (Esc)"
+            onClick={onClose}
+            className="-mr-1 shrink-0 rounded-md p-1 text-ink-500 transition-colors hover:bg-shell-800 hover:text-ink-100"
+          >
+            <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden>
+              <path d="M6 6l12 12M18 6 6 18" strokeLinecap="round" />
+            </svg>
+          </button>
+        </header>
+
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">{children}</div>
+
+        {footer && (
+          <footer className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-shell-700 bg-shell-950/50 px-5 py-3">
+            {footer}
+          </footer>
+        )}
+      </div>
     </div>
   )
 }
