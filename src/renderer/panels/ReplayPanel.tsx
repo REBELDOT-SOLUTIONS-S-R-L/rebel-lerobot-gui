@@ -25,6 +25,7 @@ import { api } from '../lib/api'
 import { loadArmKinematics } from '../lib/arm-kinematics'
 import { useSticky } from '../lib/use-sticky'
 import { rangesOf } from '../lib/use-leader-mirror'
+import { useControlClaim } from '../lib/use-control-claim'
 import { useEpisodeReplay } from '../lib/use-episode-replay'
 import type { SimManifest } from '@shared/sim'
 import { useShallow } from 'zustand/react/shallow'
@@ -95,6 +96,7 @@ export function ReplayPanel(): ReactNode {
     ranges: useMemo(() => rangesOf(snapshot?.motors ?? []), [snapshot])
   })
   const playing = replay.status === 'playing' || replay.status === 'paused'
+  useControlClaim('replay.episode', playing)
 
   /**
    * Open the simulation and watch it.

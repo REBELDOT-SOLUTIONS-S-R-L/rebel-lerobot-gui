@@ -12,7 +12,12 @@ import { SettingsPanel } from './panels/SettingsPanel'
 import { TeleoperatePanel } from './panels/TeleoperatePanel'
 import { View3DPanel } from './panels/View3DPanel'
 import { useShallow } from 'zustand/react/shallow'
-import { useAppStore, type PanelId } from './store/useAppStore'
+import {
+  selectControlling,
+  selectReachablePanels,
+  useAppStore,
+  type PanelId
+} from './store/useAppStore'
 
 /** Workflow tabs, left to right. Settings is deliberately not one of them. */
 const TABS: { id: PanelId; label: string; hint: string }[] = [
@@ -36,13 +41,18 @@ const ABOUT_TAB = {
   hint: 'Who made this, and what it is for'
 }
 
-function tabClass(active: boolean): string {
+function tabClass(active: boolean, locked = false): string {
   return `relative rounded-t-md px-3.5 py-2 text-sm transition-colors ${
     active
       ? 'bg-shell-900 font-semibold text-ink-100'
-      : 'text-ink-500 hover:bg-shell-850 hover:text-ink-300'
+      : locked
+        ? 'cursor-not-allowed text-ink-500 opacity-40'
+        : 'text-ink-500 hover:bg-shell-850 hover:text-ink-300'
   }`
 }
+
+/** Shown on a tab that cannot be opened while an arm is being driven. */
+const LOCKED_HINT = 'Stop control before switching tabs'
 
 export function App(): ReactNode {
   const {
@@ -70,6 +80,11 @@ export function App(): ReactNode {
       activeRunId: s.activeRunId
     })))
 
+  const controlling = useAppStore(selectControlling)
+  // An array so `useShallow` can compare it; a fresh Set would re-render forever.
+  const reachable = useAppStore(useShallow((s) => [...(selectReachablePanels(s) ?? [])]))
+  /** A tab that cannot be opened right now, because an arm is live elsewhere. */
+  const isLocked = (id: PanelId): boolean => reachable.length > 0 && !reachable.includes(id)
   const resolvedTheme = useResolvedTheme()
 
   useEffect(() => {
@@ -124,13 +139,15 @@ export function App(): ReactNode {
         <nav className="no-drag flex items-end gap-1 self-end">
           {TABS.map((tab) => {
             const active = panel === tab.id
+            const locked = isLocked(tab.id)
             return (
               <button
                 key={tab.id}
                 type="button"
-                title={tab.hint}
+                title={locked ? LOCKED_HINT : tab.hint}
+                disabled={locked}
                 onClick={() => setPanel(tab.id)}
-                className={tabClass(active)}
+                className={tabClass(active, locked)}
               >
                 {tab.label}
                 {active && <span className="absolute inset-x-0 -bottom-px h-px bg-shell-900" />}
@@ -152,6 +169,7 @@ export function App(): ReactNode {
               venv={settings?.venvPath ?? null}
               ok={!!caps?.ok}
               version={caps?.lerobotVersion ?? null}
+              locked={isLocked('settings')}
               onClick={() => setPanel('settings')}
             />
           </div>
@@ -170,9 +188,10 @@ export function App(): ReactNode {
 
           <button
             type="button"
-            title={SETTINGS_TAB.hint}
+            title={isLocked(SETTINGS_TAB.id) ? LOCKED_HINT : SETTINGS_TAB.hint}
+            disabled={isLocked(SETTINGS_TAB.id)}
             onClick={() => setPanel(SETTINGS_TAB.id)}
-            className={`${tabClass(panel === SETTINGS_TAB.id)} flex items-center gap-1.5`}
+            className={`${tabClass(panel === SETTINGS_TAB.id, isLocked(SETTINGS_TAB.id))} flex items-center gap-1.5`}
           >
             <GearIcon />
             {SETTINGS_TAB.label}
@@ -186,9 +205,10 @@ export function App(): ReactNode {
 
           <button
             type="button"
-            title={ABOUT_TAB.hint}
+            title={isLocked(ABOUT_TAB.id) ? LOCKED_HINT : ABOUT_TAB.hint}
+            disabled={isLocked(ABOUT_TAB.id)}
             onClick={() => setPanel(ABOUT_TAB.id)}
-            className={tabClass(panel === ABOUT_TAB.id)}
+            className={tabClass(panel === ABOUT_TAB.id, isLocked(ABOUT_TAB.id))}
           >
             {ABOUT_TAB.label}
             {panel === ABOUT_TAB.id && (
@@ -215,7 +235,26 @@ export function App(): ReactNode {
         </span>
         {activeRun?.status === 'paused' && <span className="shrink-0 text-warn-400">suspended</span>}
       </footer>
+
+      {controlling && <ControlFrame />}
     </div>
+  )
+}
+
+/**
+ * A border round the whole window while anything is driving an arm.
+ *
+ * Seen from across the room and from any tab, so there is never a question of
+ * whether the arm is live. Drawn over everything and ignores the pointer, so it
+ * cannot get in the way of the Stop button it is warning you to keep near.
+ */
+function ControlFrame(): ReactNode {
+  return (
+    <div
+      role="status"
+      aria-label="Robot control is active"
+      className="pointer-events-none fixed inset-0 z-[1000] border-[3px] border-live-400 shadow-[inset_0_0_14px_color-mix(in_srgb,var(--color-live-400)_45%,transparent)]"
+    />
   )
 }
 
@@ -224,12 +263,14 @@ function EnvBadge({
   venv,
   ok,
   version,
+  locked,
   onClick
 }: {
   loading: boolean
   venv: string | null
   ok: boolean
   version: string | null
+  locked: boolean
   onClick: () => void
 }): ReactNode {
   const label = loading
@@ -241,7 +282,13 @@ function EnvBadge({
         : 'LeRobot missing'
   const tone = loading ? 'accent' : ok ? 'live' : 'warn'
   return (
-    <button type="button" onClick={onClick} title="Open Settings">
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={locked}
+      title={locked ? LOCKED_HINT : 'Open Settings'}
+      className={locked ? 'cursor-not-allowed' : undefined}
+    >
       <Badge tone={tone as 'accent' | 'live' | 'warn'}>
         {loading && <Spinner className="h-2.5 w-2.5" />}
         {label}

@@ -32,6 +32,7 @@ import {
 } from '../components/ui'
 import { api } from '../lib/api'
 import { useArmControl } from '../lib/use-arm-control'
+import { useControlClaim } from '../lib/use-control-claim'
 import { useSticky } from '../lib/use-sticky'
 import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '../store/useAppStore'
@@ -174,6 +175,7 @@ export function ConfigurePanel(): ReactNode {
     autocal !== null && !['done', 'cancelled', 'error'].includes(autocal.phase)
   /** Either sequence has the arm; the bridge shares one thread between them. */
   const driving = motionRunning || autocalRunning
+  useControlClaim('configure.motion', driving)
 
   const startAutocal = useCallback(async (): Promise<void> => {
     setActionError(null)

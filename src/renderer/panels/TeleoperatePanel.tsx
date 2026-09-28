@@ -29,6 +29,7 @@ import { api, errorMessage } from '../lib/api'
 import { loadArmKinematics, type ArmKinematics } from '../lib/arm-kinematics'
 import { useEscapeToStop } from '../lib/use-arm-control'
 import { useSticky } from '../lib/use-sticky'
+import { useControlClaim } from '../lib/use-control-claim'
 import { rangesOf, useLeaderMirror } from '../lib/use-leader-mirror'
 import { useEeDrive } from '../lib/use-ee-drive'
 import { useShallow } from 'zustand/react/shallow'
@@ -291,6 +292,7 @@ export function TeleoperatePanel(): ReactNode {
   }, [opts.robotUid, opts.leaderUid])
 
   useEscapeToStop(engaged, () => void disengage())
+  useControlClaim('teleoperate.engaged', engaged)
 
   const drive = useEeDrive({
     uid: opts.robotUid,

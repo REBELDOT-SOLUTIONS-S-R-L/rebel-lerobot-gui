@@ -5,6 +5,7 @@ import type {
   DeviceProfile,
   LerobotCapabilities,
   RunInfo,
+  RunKind,
   SerialPortInfo
 } from '@shared/types'
 import { create } from 'zustand'
@@ -51,6 +52,14 @@ interface AppState {
    * only thing that should read or write it.
    */
   sticky: Partial<PanelSelections>
+  /**
+   * In-app control loops currently driving an arm, by who claimed it.
+   *
+   * Runs are tracked in `runs`; these are the loops that live in a panel instead
+   * (keyboard/gamepad drive, leader mirroring, episode replay, motion tests).
+   * Written only through `useControlClaim`.
+   */
+  controlClaims: Record<string, true>
 
   setPanel: (panel: PanelId) => void
   bootstrap: () => Promise<void>
@@ -67,6 +76,7 @@ interface AppState {
   refreshPorts: () => Promise<void>
   setActiveRun: (runId: string | null) => void
   setSticky: <K extends keyof PanelSelections>(key: K, value: PanelSelections[K]) => void
+  setControlClaim: (key: string, active: boolean) => void
   upsertRun: (info: RunInfo) => void
   refreshRuns: () => Promise<void>
 }
@@ -87,8 +97,15 @@ export const useAppStore = create<AppState>((set, get) => ({
   runs: [],
   activeRunId: null,
   sticky: {},
+  controlClaims: {},
 
-  setPanel: (panel) => set({ panel }),
+  // While an arm is live the tab that drives it stays on screen, with its Stop
+  // button; the links inside panels come through here too, so they are held back.
+  setPanel: (panel) =>
+    set((state) => {
+      const allowed = selectReachablePanels(state)
+      return allowed && !allowed.has(panel) ? state : { panel }
+    }),
 
   bootstrap: async () => {
     const [info, settings, profiles, demos, demoRuns] = await Promise.all([
@@ -215,6 +232,15 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   setSticky: (key, value) => set((state) => ({ sticky: { ...state.sticky, [key]: value } })),
 
+  setControlClaim: (key, active) =>
+    set((state) => {
+      if (active === key in state.controlClaims) return state
+      const controlClaims = { ...state.controlClaims }
+      if (active) controlClaims[key] = true
+      else delete controlClaims[key]
+      return { controlClaims }
+    }),
+
   upsertRun: (info) =>
     set((state) => {
       const idx = state.runs.findIndex((r) => r.runId === info.runId)
@@ -234,6 +260,46 @@ export const selectProfilesByRole = (role: 'robot' | 'teleop') => (s: AppState) 
 
 export const selectRun = (runId: string | null) => (s: AppState) =>
   runId ? (s.runs.find((r) => r.runId === runId) ?? null) : null
+
+/**
+ * Runs that open a connection to an arm, and the tab each is started — and
+ * stopped — from. Installs and pip lists are not here: they drive nothing.
+ */
+const CONTROL_RUN_PANELS: Partial<Record<RunKind, PanelId>> = {
+  demo: 'demos',
+  calibrate: 'configure',
+  'setup-motors': 'configure',
+  teleoperate: 'teleoperate',
+  record: 'teleoperate',
+  replay: 'replay',
+  infer: 'infer'
+}
+
+function liveControlRuns(s: AppState): RunInfo[] {
+  return s.runs.filter(
+    (r) =>
+      r.kind in CONTROL_RUN_PANELS &&
+      (r.status === 'starting' || r.status === 'running' || r.status === 'paused')
+  )
+}
+
+/** Something — a run or an in-app loop — has a live connection driving an arm. */
+export function selectControlling(s: AppState): boolean {
+  return Object.keys(s.controlClaims).length > 0 || liveControlRuns(s).length > 0
+}
+
+/**
+ * The tabs that can be opened while control is live, or null when any can.
+ *
+ * The current tab, plus the one owning each live run: a dev reload keeps a run
+ * going but lands on Configure, and its Stop button has to stay reachable.
+ */
+export function selectReachablePanels(s: AppState): ReadonlySet<PanelId> | null {
+  if (!selectControlling(s)) return null
+  const panels = new Set<PanelId>([s.panel])
+  for (const run of liveControlRuns(s)) panels.add(CONTROL_RUN_PANELS[run.kind]!)
+  return panels
+}
 
 export function isEnvReady(s: AppState): boolean {
   return !!s.settings?.venvPath && !!s.caps?.ok
