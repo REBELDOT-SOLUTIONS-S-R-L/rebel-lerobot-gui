@@ -4,6 +4,7 @@ import type { EeController } from '@shared/types'
 import { useCallback, useEffect, useState } from 'react'
 import { errorMessage } from './api'
 import { loadArmKinematics, type ArmKinematics } from './arm-kinematics'
+import { useControlClaim } from './use-control-claim'
 import { useEeDrive, type EeDriveState } from './use-ee-drive'
 import { useSticky } from './use-sticky'
 
@@ -95,6 +96,7 @@ export function useArmControl(opts: {
   const start = useCallback(() => setEngaged(true), [])
 
   useEscapeToStop(engaged, stop)
+  useControlClaim(`${panel}.arm-control`, engaged && available)
 
   const drive = useEeDrive({
     uid,
