@@ -10,6 +10,9 @@ import type { BusSnapshot } from '@shared/types'
 import { isVirtual } from '@shared/virtual'
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { ArmControlButton, ArmControlFields } from '../components/ArmControl'
+import { RosPublishToggle } from '../components/RosPublishToggle'
+import { rangesOf } from '../lib/use-leader-mirror'
+import { useRosPublish } from '../lib/use-ros-publish'
 import { ArmViewport } from '../components/ArmViewport'
 import { SplitLayout } from '../components/SplitLayout'
 import { Badge, Button, Field, Notice, Panel, Select, Spinner } from '../components/ui'
@@ -165,6 +168,18 @@ export function View3DPanel(): ReactNode {
     panel: 'view3d'
   })
 
+  const ros = useRosPublish({
+    panel: 'view3d',
+    active: control.engaged,
+    mode: 'control',
+    devices: [
+      {
+        uid: device?.uid ?? null,
+        ranges: useMemo(() => rangesOf(snapshot?.motors ?? []), [snapshot])
+      }
+    ]
+  })
+
   const pose = manifest ? poseFromReadings(manifest, readings) : {}
   const uncalibrated = snapshot?.motors.some((m) => m.rangeMin === null) ?? false
 
@@ -278,6 +293,9 @@ export function View3DPanel(): ReactNode {
                 control={control}
                 hint="Fly the arm and watch the model follow it. Teleoperate does the same with the option to record."
               />
+              <div className="mt-3">
+                <RosPublishToggle ros={ros} />
+              </div>
             </Panel>
           )}
 

@@ -24,6 +24,7 @@ import type {
   SerialPortInfo
 } from '@shared/types'
 import type { Demo, DemoDraft } from '@shared/demos'
+import type { RosAttachRequest, RosStatus } from '@shared/ros'
 import { contextBridge, ipcRenderer } from 'electron'
 
 type Unsubscribe = () => void
@@ -220,6 +221,18 @@ const api = {
     onOutput: (cb: (payload: { runId: string; data: string }) => void) =>
       on<{ runId: string; data: string }>('run:output', cb),
     onStatus: (cb: (info: RunInfo) => void) => on<RunInfo>('run:status', cb)
+  },
+
+  /** ROS 2 telemetry over rosbridge. See `@shared/ros` for the topics. */
+  ros: {
+    status: () => invoke<RosStatus>('ros:status'),
+    /** Publish a device while a panel drives it; again with new ranges to update. */
+    attach: (req: RosAttachRequest) => invoke<RosStatus>('ros:attach', req),
+    detach: (uid: string) => invoke<RosStatus>('ros:detach', uid),
+    reset: () => invoke<RosStatus>('ros:reset'),
+    /** Resolves true when rosbridge answers at `url` (default: the saved one). */
+    test: (url?: string) => invoke<boolean>('ros:test', url),
+    onStatus: (cb: (status: RosStatus) => void) => on<RosStatus>('ros:status', cb)
   }
 }
 

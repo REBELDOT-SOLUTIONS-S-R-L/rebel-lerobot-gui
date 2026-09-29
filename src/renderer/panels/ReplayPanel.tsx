@@ -26,6 +26,8 @@ import { loadArmKinematics } from '../lib/arm-kinematics'
 import { useSticky } from '../lib/use-sticky'
 import { rangesOf } from '../lib/use-leader-mirror'
 import { useControlClaim } from '../lib/use-control-claim'
+import { useRosPublish } from '../lib/use-ros-publish'
+import { RosPublishToggle } from '../components/RosPublishToggle'
 import { useEpisodeReplay } from '../lib/use-episode-replay'
 import type { SimManifest } from '@shared/sim'
 import { useShallow } from 'zustand/react/shallow'
@@ -97,6 +99,12 @@ export function ReplayPanel(): ReactNode {
   })
   const playing = replay.status === 'playing' || replay.status === 'paused'
   useControlClaim('replay.episode', playing)
+  const ros = useRosPublish({
+    panel: 'replay',
+    active: playing,
+    mode: 'replay',
+    devices: [{ uid: opts.robotUid, ranges: useMemo(() => rangesOf(snapshot?.motors ?? []), [snapshot]) }]
+  })
 
   /**
    * Open the simulation and watch it.
@@ -402,6 +410,8 @@ export function ReplayPanel(): ReactNode {
                   </Button>
                 </div>
 
+                <RosPublishToggle ros={ros} />
+
                 {!envReady && (
                   <Notice tone="warn">
                     Reading the episode goes through LeRobot, so set up the environment in Settings
@@ -462,6 +472,7 @@ export function ReplayPanel(): ReactNode {
                 disabledReason={!envReady ? 'Set up the environment in Settings first.' : missing}
                 onStart={start}
               />
+              <RosPublishToggle ros={ros} unavailable="LeRobot commands hold the serial port themselves, so the app has no readings to publish from them yet. Publishing works for driving from the app: the virtual arm, keyboard and gamepad." />
               {startError && (
                   <Notice tone="error" onClose={() => setStartError(null)}>
                     {startError}

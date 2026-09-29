@@ -24,6 +24,7 @@ import type {
   TeleoperateOptions
 } from '@shared/types'
 import type { Demo, DemoDraft } from '@shared/demos'
+import { DEFAULT_ROSBRIDGE_URL, type RosAttachRequest, type RosStatus } from '@shared/ros'
 import { THUMBNAIL_EXTENSIONS } from '@shared/demos'
 import { drivenInApp } from '@shared/teleop-input'
 import { isVirtual } from '@shared/virtual'
@@ -80,6 +81,8 @@ import {
   settings,
   upsertProfile
 } from './stores/settings'
+import { probeRosbridge } from './ros/rosbridge-client'
+import { rosClient, rosPublisher } from './ros'
 import { virtualBus } from './virtual-bus'
 
 /**
@@ -215,6 +218,10 @@ export function registerIpc(): void {
     if ('venvPath' in patch) {
       capsCache = null
       void bridge.shutdown()
+    }
+    // Sessions follow the address; with none, the next one picks it up.
+    if ('rosbridgeUrl' in patch && rosClient.state !== 'idle') {
+      rosClient.open(next.rosbridgeUrl || DEFAULT_ROSBRIDGE_URL)
     }
     return next
   })
@@ -449,6 +456,7 @@ export function registerIpc(): void {
     const profile = await wiredDevice(uid)
     try {
       await bridge.request('bus.open', { port: profile.port }, 30_000)
+      rosPublisher.setBusDevice(uid)
       const state = await bridge.request<Parameters<typeof snapshotFromBridge>[1]>('bus.state', {}, 30_000)
       return snapshotFromBridge(profile, state)
     } catch (err) {
@@ -478,6 +486,7 @@ export function registerIpc(): void {
 
   handle('bus:disconnect', async (uid?: string) => {
     if (isVirtual(uid)) return virtualBus.close()
+    rosPublisher.setBusDevice(null)
     if (!bridge.running) return { closed: true }
     return bridge.request('bus.close', {}, 10_000)
   })
@@ -552,11 +561,12 @@ export function registerIpc(): void {
       ? virtualBus.torque(enabled, motor)
       : bridge.request('motor.torque', { enabled, motor: motor ?? null }, 30_000)
   )
-  handle('motor:move', (uid: string, motor: string, position: number) =>
-    isVirtual(uid)
+  handle('motor:move', (uid: string, motor: string, position: number) => {
+    rosPublisher.command(uid, { [motor]: position })
+    return isVirtual(uid)
       ? virtualBus.move(motor, position)
       : bridge.request('motor.move', { motor, position }, 15_000)
-  )
+  })
 
   /**
    * Every joint at once — one round trip per control frame.
@@ -566,10 +576,25 @@ export function registerIpc(): void {
    * them one motor at a time would cost six round trips at 50 Hz and land the
    * joints at visibly different moments.
    */
-  handle('motor:moveMany', (uid: string, positions: Record<string, number>) =>
-    isVirtual(uid)
+  handle('motor:moveMany', (uid: string, positions: Record<string, number>) => {
+    rosPublisher.command(uid, positions)
+    return isVirtual(uid)
       ? virtualBus.moveMany(positions)
       : bridge.request<{ written: string[] }>('motor.moveMany', { positions }, 15_000)
+  })
+
+  /* -- ROS 2 -------------------------------------------------------- */
+
+  handle('ros:status', (): RosStatus => rosPublisher.status())
+  handle('ros:attach', (req: RosAttachRequest): RosStatus => rosPublisher.attach(req))
+  handle('ros:detach', (uid: string): RosStatus => rosPublisher.detach(uid))
+  // A reloaded renderer has lost the panels that attached anything.
+  handle('ros:reset', (): RosStatus => {
+    rosPublisher.detachAll()
+    return rosPublisher.status()
+  })
+  handle('ros:test', (url?: string) =>
+    probeRosbridge(url || settings().get().rosbridgeUrl || DEFAULT_ROSBRIDGE_URL).then(() => true)
   )
 
   /* -- calibration files -------------------------------------------- */
@@ -681,10 +706,20 @@ export function registerIpc(): void {
 
   runner.on('output', (payload) => broadcast('run:output', payload))
   runner.on('status', (info) => broadcast('run:status', info))
-  bridge.on('notification', (frame) => broadcast('bridge:notification', frame))
+  bridge.on('notification', (frame) => {
+    broadcast('bridge:notification', frame)
+    if (frame.type === 'positions' && frame.source !== 'virtual') {
+      rosPublisher.positions('bus', frame.positions as Record<string, number>)
+    }
+  })
   // Same channel as the sidecar's frames, tagged with `source: 'virtual'`, so a
   // panel reading positions does not care which arm it is watching.
-  virtualBus.on('notification', (frame) => broadcast('bridge:notification', frame))
+  virtualBus.on('notification', (frame) => {
+    broadcast('bridge:notification', frame)
+    if (frame.type === 'positions') rosPublisher.positions('virtual', frame.positions)
+  })
+  rosPublisher.on('status', (status: RosStatus) => broadcast('ros:status', status))
+  rosClient.on('log', (text: string) => broadcast('bridge:log', text))
   bridge.on('log', (text) => broadcast('bridge:log', text))
   bridge.on('closed', (payload) => broadcast('bridge:closed', payload))
   bridge.on('ready', (payload) => broadcast('bridge:ready', payload))

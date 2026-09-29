@@ -1,3 +1,4 @@
+import { DEFAULT_ROSBRIDGE_URL } from '@shared/ros'
 import type { AppSettings, DeviceProfile } from '@shared/types'
 import { VIRTUAL_ID, isVirtual, virtualProfile } from '@shared/virtual'
 import { defaultCalibrationDir, defaultDatasetRoot } from '../paths'
@@ -15,7 +16,8 @@ function defaults(): AppSettings {
     defaultDatasetRoot: defaultDatasetRoot(),
     preferUv: false,
     theme: 'dark',
-    sidebarWidths: { configure: 380, view3d: 340, teleoperate: 420, replay: 420, infer: 420 }
+    sidebarWidths: { configure: 380, view3d: 340, teleoperate: 420, replay: 420, infer: 420 },
+    rosbridgeUrl: DEFAULT_ROSBRIDGE_URL
   }
 }
 
