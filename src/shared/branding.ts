@@ -36,9 +36,31 @@ export const ABOUT = {
     detail: "Anthropic's agentic coding tool — the app was written with it, start to finish.",
     url: 'https://claude.com/claude-code'
   },
+  /** The model that wrote the code, working in Claude Code. */
+  writtenBy: {
+    name: 'Claude',
+    detail:
+      "Anthropic's AI model, working in Claude Code, wrote the code, directed and reviewed by the developer.",
+    url: 'https://www.anthropic.com/claude'
+  },
   inspiredBy: {
     name: 'LeRobot',
     detail: "Hugging Face's robotics library, which does the actual driving of the arms.",
     url: 'https://github.com/huggingface/lerobot'
-  }
+  },
+  licence: 'MIT',
+  company: {
+    name: 'RebelDot',
+    department: 'Physical AI department',
+    url: 'https://rebeldot.com'
+  },
+  /** What the app is made of, grouped the way the About panel lists it. */
+  stack: [
+    { area: 'App shell', items: ['Electron', 'React', 'TypeScript'] },
+    { area: 'Interface', items: ['Tailwind CSS', 'Zustand', 'three.js', 'xterm.js'] },
+    { area: 'Build and test', items: ['electron-vite', 'Vite', 'electron-builder', 'Vitest'] },
+    { area: 'Robot side', items: ['LeRobot CLI', 'Python sidecar', 'Feetech motor bus', 'node-pty'] },
+    { area: 'Models', items: ['SO-ARM100 URDFs', 'Blender (offline scene builds)'] },
+    { area: 'ROS 2', items: ['rosbridge (JSON over WebSocket)'] }
+  ]
 } as const

@@ -12,6 +12,7 @@ import type {
 } from '@shared/types'
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { ArmControlButton, ArmControlFields } from '../components/ArmControl'
+import { RosPublishChip, RosPublishToggle } from '../components/RosPublishToggle'
 import { ArmDiagram } from '../components/ArmDiagram'
 import { ConsolePane } from '../components/ConsolePane'
 import { MotorEditor } from '../components/MotorEditor'
@@ -33,6 +34,8 @@ import {
 import { api } from '../lib/api'
 import { useArmControl } from '../lib/use-arm-control'
 import { useControlClaim } from '../lib/use-control-claim'
+import { rangesOf } from '../lib/use-leader-mirror'
+import { useRosPublish } from '../lib/use-ros-publish'
 import { useSticky } from '../lib/use-sticky'
 import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '../store/useAppStore'
@@ -404,6 +407,18 @@ export function ConfigurePanel(): ReactNode {
     panel: 'configure'
   })
 
+  const ros = useRosPublish({
+    panel: 'configure',
+    active: control.engaged || driving,
+    mode: driving ? 'calibrate' : 'control',
+    devices: [
+      {
+        uid: draft?.uid ?? null,
+        ranges: useMemo(() => rangesOf(snapshot?.motors ?? []), [snapshot])
+      }
+    ]
+  })
+
   const motor = snapshot?.motors.find((m) => m.name === selectedMotor) ?? null
   const calibrationPath = draft ? `${draft.calibrationDir}/${draft.id}.json`.replace(/\/+/g, '/') : ''
 
@@ -433,6 +448,7 @@ export function ConfigurePanel(): ReactNode {
           }
           actions={
             <div className="flex items-center gap-2">
+              {draft?.role === 'robot' && !simulated && <RosPublishChip ros={ros} />}
               {draft?.role === 'robot' && !simulated && (
                 <Button
                   size="sm"
@@ -661,6 +677,7 @@ export function ConfigurePanel(): ReactNode {
                   control={control}
                   hint="Fly the arm from this screen and watch the motor table follow it. Teleoperate does the same with a bigger view and the option to record."
                 />
+                <RosPublishToggle ros={ros} />
 
                 <Divider label="simulation" />
 

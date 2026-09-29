@@ -159,6 +159,73 @@ app.whenReady().then(async () => {
     record('virtual arm checks', false, err.message)
   }
 
+  // --- ROS 2 over rosbridge ----------------------------------------------
+  // A stand-in rosbridge: just enough websocket server to accept the app's
+  // client and collect what it sends, so the whole path — Electron's own
+  // WebSocket, the publisher, the virtual arm's stream — runs for real.
+  {
+    const fake = await startFakeRosbridge()
+    const saved = (await callIpc('settings:get')).value.rosbridgeUrl
+    try {
+      await callIpc('settings:set', { rosbridgeUrl: fake.url })
+      const probe = await callIpc('ros:test', fake.url)
+      record('ros:test reaches rosbridge', probe.ok === true && probe.value === true, probe.error)
+
+      const snap = (await callIpc('bus:connect', VIRTUAL_UID)).value
+      const ranges = {}
+      for (const m of snap.motors) ranges[m.name] = { min: m.rangeMin, max: m.rangeMax }
+      await callIpc('bus:streamStart', VIRTUAL_UID, 30)
+      const attached = await callIpc('ros:attach', { uid: VIRTUAL_UID, mode: 'control', ranges })
+      record('ros:attach starts a session', attached.ok === true, attached.error)
+
+      // Commands made while the socket is still connecting are dropped, by design.
+      await new Promise((resolve) => setTimeout(resolve, 800))
+      await callIpc('motor:moveMany', VIRTUAL_UID, { elbow_flex: 2300 })
+      await new Promise((resolve) => setTimeout(resolve, 800))
+
+      const frames = fake.frames
+      const published = (topic) => frames.filter((f) => f.op === 'publish' && f.topic === topic)
+      const advertised = frames.filter((f) => f.op === 'advertise').map((f) => f.topic)
+      record(
+        'every topic is advertised under the device namespace',
+        ['joint_states', 'joint_command', 'robot_description', 'diagnostics', 'session'].every((t) =>
+          advertised.includes(`/virtual_arm/${t}`)
+        ),
+        advertised.join(', ')
+      )
+      const states = published('/virtual_arm/joint_states')
+      const first = states[0] && states[0].msg
+      record(
+        'joint_states streams all six joints in radians',
+        states.length >= 20 && first.name.length === 6 && first.position.every((v) => Math.abs(v) < 7),
+        `messages=${states.length}`
+      )
+      record('joint_command follows the goals written', published('/virtual_arm/joint_command').length >= 1)
+      const description = published('/virtual_arm/robot_description')[0]
+      record(
+        'robot_description carries the URDF with resolvable meshes',
+        !!description && description.msg.data.includes('<robot') && description.msg.data.includes('file://')
+      )
+      record('diagnostics go out once a second', published('/virtual_arm/diagnostics').length >= 1)
+
+      await callIpc('ros:detach', VIRTUAL_UID)
+      await new Promise((resolve) => setTimeout(resolve, 200))
+      const sessions = published('/virtual_arm/session').map((f) => JSON.parse(f.msg.data).active)
+      const status = (await callIpc('ros:status')).value
+      record(
+        'ros:detach ends the session',
+        sessions.join() === 'true,false' && status.sessions.length === 0,
+        `session=${sessions.join()}`
+      )
+    } catch (err) {
+      record('ROS 2 checks', false, err.message)
+    } finally {
+      await callIpc('bus:streamStop', VIRTUAL_UID)
+      await callIpc('settings:set', { rosbridgeUrl: saved })
+      fake.close()
+    }
+  }
+
   try {
     const discovered = await callIpc('datasets:discover')
     record('datasets:discover responds', discovered.ok === true, `found=${(discovered.value || []).length}`)
@@ -482,6 +549,68 @@ app.whenReady().then(async () => {
 
   await finish()
 })
+
+/**
+ * The smallest websocket server that will talk to a browser-style client:
+ * the handshake, and unmasking the text frames it sends. Nothing is sent back.
+ */
+function startFakeRosbridge() {
+  const http = require('node:http')
+  const crypto = require('node:crypto')
+  const frames = []
+  const sockets = []
+  const server = http.createServer()
+  server.on('upgrade', (req, socket) => {
+    const accept = crypto
+      .createHash('sha1')
+      .update(req.headers['sec-websocket-key'] + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11')
+      .digest('base64')
+    socket.write(
+      'HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n' +
+        `Sec-WebSocket-Accept: ${accept}\r\n\r\n`
+    )
+    sockets.push(socket)
+    let buffer = Buffer.alloc(0)
+    socket.on('data', (chunk) => {
+      buffer = Buffer.concat([buffer, chunk])
+      for (;;) {
+        if (buffer.length < 2) return
+        const opcode = buffer[0] & 0x0f
+        let length = buffer[1] & 0x7f
+        let offset = 2
+        if (length === 126) {
+          if (buffer.length < 4) return
+          length = buffer.readUInt16BE(2)
+          offset = 4
+        } else if (length === 127) {
+          if (buffer.length < 10) return
+          length = Number(buffer.readBigUInt64BE(2))
+          offset = 10
+        }
+        if (buffer.length < offset + 4 + length) return
+        const mask = buffer.subarray(offset, offset + 4)
+        const payload = Buffer.from(buffer.subarray(offset + 4, offset + 4 + length))
+        for (let i = 0; i < payload.length; i++) payload[i] ^= mask[i % 4]
+        buffer = buffer.subarray(offset + 4 + length)
+        if (opcode === 1) frames.push(JSON.parse(payload.toString('utf8')))
+        if (opcode === 8) socket.end()
+      }
+    })
+    socket.on('error', () => undefined)
+  })
+  return new Promise((resolve) => {
+    server.listen(0, '127.0.0.1', () => {
+      resolve({
+        url: `ws://127.0.0.1:${server.address().port}`,
+        frames,
+        close: () => {
+          for (const s of sockets) s.destroy()
+          server.close()
+        }
+      })
+    })
+  })
+}
 
 async function finish() {
   // Never leave the user's configured environment pointing at a test venv.

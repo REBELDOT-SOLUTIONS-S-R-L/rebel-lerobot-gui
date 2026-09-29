@@ -30,6 +30,8 @@ import { loadArmKinematics, type ArmKinematics } from '../lib/arm-kinematics'
 import { useEscapeToStop } from '../lib/use-arm-control'
 import { useSticky } from '../lib/use-sticky'
 import { useControlClaim } from '../lib/use-control-claim'
+import { useRosPublish } from '../lib/use-ros-publish'
+import { RosPublishToggle } from '../components/RosPublishToggle'
 import { rangesOf, useLeaderMirror } from '../lib/use-leader-mirror'
 import { useEeDrive } from '../lib/use-ee-drive'
 import { useShallow } from 'zustand/react/shallow'
@@ -309,6 +311,19 @@ export function TeleoperatePanel(): ReactNode {
     engaged: engaged && mirrorMode,
     leaderRanges: useMemo(() => rangesOf(leaderSnapshot?.motors ?? []), [leaderSnapshot]),
     followerRanges: useMemo(() => rangesOf(snapshot?.motors ?? []), [snapshot])
+  })
+
+  const followerRanges = useMemo(() => rangesOf(snapshot?.motors ?? []), [snapshot])
+  const leaderRanges = useMemo(() => rangesOf(leaderSnapshot?.motors ?? []), [leaderSnapshot])
+  const ros = useRosPublish({
+    panel: 'teleoperate',
+    active: engaged,
+    mode: 'teleoperate',
+    devices: [
+      { uid: opts.robotUid, ranges: followerRanges },
+      // Mirrored, the leader is read by the app too, so it has its own namespace.
+      { uid: mirrorMode ? opts.leaderUid : null, ranges: leaderRanges }
+    ]
   })
 
   /* -- starting a lerobot run --------------------------------------- */
@@ -678,6 +693,8 @@ export function TeleoperatePanel(): ReactNode {
                   </Button>
                 )}
 
+                <RosPublishToggle ros={ros} />
+
                 {!engaged && missing && <Notice tone="warn">{missing}</Notice>}
                 {startError && (
                   <Notice tone="error" onClose={() => setStartError(null)}>
@@ -741,6 +758,8 @@ export function TeleoperatePanel(): ReactNode {
                     </Button>
                   )}
                 </TransportBar>
+
+                <RosPublishToggle ros={ros} unavailable="LeRobot commands hold the serial port themselves, so the app has no readings to publish from them yet. Publishing works for driving from the app: the virtual arm, keyboard and gamepad." />
 
                 {startError && (
                   <Notice tone="error" onClose={() => setStartError(null)}>

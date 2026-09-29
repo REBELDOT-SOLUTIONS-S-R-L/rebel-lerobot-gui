@@ -61,6 +61,8 @@ export interface AppSettings {
   theme: ThemeChoice
   /** Width in px of each panel's right column, set by dragging its splitter. */
   sidebarWidths: Record<SplitPanelId, number>
+  /** rosbridge websocket that ROS 2 telemetry is published to. */
+  rosbridgeUrl: string
 }
 
 /* ------------------------------------------------------------------ *

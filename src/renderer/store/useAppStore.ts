@@ -1,4 +1,5 @@
 import type { Demo, DemoDraft } from '@shared/demos'
+import type { RosStatus } from '@shared/ros'
 import type {
   AppInfo,
   AppSettings,
@@ -60,6 +61,8 @@ interface AppState {
    * Written only through `useControlClaim`.
    */
   controlClaims: Record<string, true>
+  /** What the ROS 2 publisher in the main process is doing. */
+  rosStatus: RosStatus | null
 
   setPanel: (panel: PanelId) => void
   bootstrap: () => Promise<void>
@@ -77,6 +80,7 @@ interface AppState {
   setActiveRun: (runId: string | null) => void
   setSticky: <K extends keyof PanelSelections>(key: K, value: PanelSelections[K]) => void
   setControlClaim: (key: string, active: boolean) => void
+  setRosStatus: (status: RosStatus) => void
   upsertRun: (info: RunInfo) => void
   refreshRuns: () => Promise<void>
 }
@@ -98,6 +102,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   activeRunId: null,
   sticky: {},
   controlClaims: {},
+  rosStatus: null,
 
   // While an arm is live the tab that drives it stays on screen, with its Stop
   // button; the links inside panels come through here too, so they are held back.
@@ -108,14 +113,17 @@ export const useAppStore = create<AppState>((set, get) => ({
     }),
 
   bootstrap: async () => {
-    const [info, settings, profiles, demos, demoRuns] = await Promise.all([
+    const [info, settings, profiles, demos, demoRuns, rosStatus] = await Promise.all([
       attempt(api.app.info()),
       attempt(api.settings.get()),
       attempt(api.profiles.list()),
       attempt(api.demos.list()),
-      attempt(api.demos.running())
+      attempt(api.demos.running()),
+      // Unlike a demo, a ROS session belongs to a panel, and a reload lost it.
+      attempt(api.ros.reset())
     ])
     set({
+      rosStatus: rosStatus.value ?? null,
       appInfo: info.value ?? null,
       settings: settings.value ?? null,
       profiles: profiles.value ?? [],
@@ -240,6 +248,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       else delete controlClaims[key]
       return { controlClaims }
     }),
+
+  setRosStatus: (rosStatus) => set({ rosStatus }),
 
   upsertRun: (info) =>
     set((state) => {

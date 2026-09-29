@@ -363,6 +363,36 @@ class BusSession:
                         continue
                 return out
 
+    # Registers the ROS diagnostics topic reports, and the field each lands in.
+    TELEMETRY_REGISTERS: tuple[tuple[str, str], ...] = (
+        ("Present_Temperature", "temperature"),
+        ("Present_Voltage", "voltage"),
+        ("Present_Load", "load"),
+        ("Present_Current", "current"),
+        ("Status", "status"),
+    )
+
+    def read_telemetry(self) -> dict[str, dict[str, int | None]]:
+        """
+        The health registers of every motor, one sync read per register.
+
+        Cheap enough to take alongside a running position stream, which the full
+        `read_state` table — a dozen single reads per motor — is not. A register
+        the sync read cannot fetch is left out rather than failing the rest.
+        """
+        bus = self.require()
+        out: dict[str, dict[str, int | None]] = {name: {} for name, _ in SO_MOTORS}
+        with self._lock:
+            for register, field in self.TELEMETRY_REGISTERS:
+                try:
+                    values = bus.sync_read(register, normalize=False)
+                except Exception:  # noqa: BLE001 - a missing register must not hide the rest
+                    continue
+                for name, value in values.items():
+                    if name in out:
+                        out[name][field] = int(value)
+        return out
+
     # -- streaming ---------------------------------------------------------
 
     def start_stream(self, hz: float = 10.0) -> dict[str, Any]:
@@ -1374,6 +1404,10 @@ def m_bus_positions(**_: Any) -> dict[str, Any]:
     return {"positions": SESSION.read_positions()}
 
 
+def m_bus_telemetry(**_: Any) -> dict[str, Any]:
+    return {"motors": SESSION.read_telemetry()}
+
+
 def m_bus_stream_start(hz: float = 10.0, **_: Any) -> dict[str, Any]:
     return SESSION.start_stream(hz)
 
@@ -1527,6 +1561,7 @@ METHODS: dict[str, Callable[..., Any]] = {
     "bus.close": m_bus_close,
     "bus.state": m_bus_state,
     "bus.positions": m_bus_positions,
+    "bus.telemetry": m_bus_telemetry,
     "bus.streamStart": m_bus_stream_start,
     "bus.streamStop": m_bus_stream_stop,
     "bus.recordRom": m_bus_record_rom,

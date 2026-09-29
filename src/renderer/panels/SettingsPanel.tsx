@@ -1,4 +1,5 @@
 import { PYTHON_RANGE } from '@shared/devices'
+import { DEFAULT_ROSBRIDGE_URL, ROS_TOPICS } from '@shared/ros'
 import type { InstalledPackage, PythonCandidate, RunInfo, ThemeChoice } from '@shared/types'
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { ConsolePane } from '../components/ConsolePane'
@@ -354,6 +355,11 @@ export function SettingsPanel(): ReactNode {
             </Field>
           </div>
         </Panel>
+
+        <RosSettings
+          url={settings?.rosbridgeUrl ?? DEFAULT_ROSBRIDGE_URL}
+          onSave={(rosbridgeUrl) => void saveSettings({ rosbridgeUrl })}
+        />
       </div>
 
       <div className="flex min-h-0 flex-col gap-4 overflow-hidden">
@@ -493,6 +499,85 @@ export function SettingsPanel(): ReactNode {
         <ConsolePane run={run} className="shrink-0" heightClass="h-48" />
       </div>
     </div>
+  )
+}
+
+/**
+ * Where ROS 2 telemetry goes.
+ *
+ * Only an address: which arms publish is chosen beside each panel's start
+ * button, where the driving happens.
+ */
+function RosSettings({ url, onSave }: { url: string; onSave: (url: string) => void }): ReactNode {
+  const [draft, setDraft] = useState(url)
+  const [testing, setTesting] = useState(false)
+  const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null)
+  useEffect(() => setDraft(url), [url])
+
+  const test = async (): Promise<void> => {
+    setTesting(true)
+    setResult(null)
+    const target = draft.trim() || DEFAULT_ROSBRIDGE_URL
+    const res = await api.ros.test(target)
+    setResult(res.ok ? { ok: true, message: `rosbridge answered at ${target}.` } : { ok: false, message: res.error })
+    setTesting(false)
+  }
+
+  return (
+    <Panel
+      title="ROS 2"
+      description="Telemetry is published through rosbridge, so ROS does not have to be installed on this machine."
+    >
+      <div className="flex flex-col gap-3">
+        <Field
+          label="rosbridge address"
+          hint={
+            <>
+              Start it wherever ROS 2 runs with{' '}
+              <code>ros2 launch rosbridge_server rosbridge_websocket_launch.xml</code>.
+            </>
+          }
+        >
+          <TextInput
+            value={draft}
+            placeholder={DEFAULT_ROSBRIDGE_URL}
+            spellCheck={false}
+            onChange={(e) => {
+              setDraft(e.target.value)
+              setResult(null)
+            }}
+          />
+        </Field>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="primary"
+            disabled={draft.trim() === url}
+            onClick={() => onSave(draft.trim() || DEFAULT_ROSBRIDGE_URL)}
+          >
+            Save
+          </Button>
+          <Button variant="secondary" disabled={testing} onClick={() => void test()}>
+            {testing ? <Spinner /> : 'Test connection'}
+          </Button>
+        </div>
+        {result && (
+          <Notice tone={result.ok ? 'success' : 'error'} onClose={() => setResult(null)}>
+            {result.message}
+          </Notice>
+        )}
+        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
+          {Object.values(ROS_TOPICS).map((topic) => (
+            <div key={topic.name} className="contents">
+              <dt className="font-mono text-ink-300">/&lt;device&gt;/{topic.name}</dt>
+              <dd className="font-mono text-ink-600">
+                {topic.type.replace('/msg/', '/')}
+                {topic.latch ? ' · latched' : ''}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      </div>
+    </Panel>
   )
 }
 

@@ -32,6 +32,11 @@ export interface PanelSelections {
   'infer.options': InferOptions
   'settings.extras': string
   'settings.installFromSource': boolean
+  /** Publish to ROS 2 while the panel drives an arm. */
+  'configure.ros': boolean
+  'view3d.ros': boolean
+  'teleoperate.ros': boolean
+  'replay.ros': boolean
 }
 
 

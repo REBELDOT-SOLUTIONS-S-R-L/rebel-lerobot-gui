@@ -1,3 +1,4 @@
+import type { RosStatus } from '@shared/ros'
 import { useEffect, type ReactNode } from 'react'
 import { Badge, Spinner } from './components/ui'
 import { Wordmark } from './components/Wordmark'
@@ -65,7 +66,9 @@ export function App(): ReactNode {
     capsLoading,
     upsertRun,
     runs,
-    activeRunId
+    activeRunId,
+    rosStatus,
+    setRosStatus
   } = useAppStore(
     useShallow((s) => ({
       panel: s.panel,
@@ -77,7 +80,9 @@ export function App(): ReactNode {
       capsLoading: s.capsLoading,
       upsertRun: s.upsertRun,
       runs: s.runs,
-      activeRunId: s.activeRunId
+      activeRunId: s.activeRunId,
+      rosStatus: s.rosStatus,
+      setRosStatus: s.setRosStatus
     })))
 
   const controlling = useAppStore(selectControlling)
@@ -106,6 +111,8 @@ export function App(): ReactNode {
     media.addEventListener('change', apply)
     return () => media.removeEventListener('change', apply)
   }, [settings?.theme])
+
+  useEffect(() => api.ros.onStatus(setRosStatus), [setRosStatus])
 
   // Run status arrives from the main process for every panel, so subscribe once.
   useEffect(() => {
@@ -164,6 +171,7 @@ export function App(): ReactNode {
                 {busyRuns.length} running
               </Badge>
             )}
+            {rosStatus && rosStatus.sessions.length > 0 && <RosBadge status={rosStatus} />}
             <EnvBadge
               loading={capsLoading}
               venv={settings?.venvPath ?? null}
@@ -255,6 +263,23 @@ function ControlFrame(): ReactNode {
       aria-label="Robot control is active"
       className="pointer-events-none fixed inset-0 z-[1000] border-[3px] border-live-400 shadow-[inset_0_0_14px_color-mix(in_srgb,var(--color-live-400)_45%,transparent)]"
     />
+  )
+}
+
+/** Which arms are going out over ROS 2, and whether they are arriving. */
+function RosBadge({ status }: { status: RosStatus }): ReactNode {
+  const rate = status.sessions.reduce((sum, s) => sum + s.rate, 0)
+  const tone = status.state === 'connected' ? 'live' : status.state === 'error' ? 'error' : 'warn'
+  const title =
+    status.state === 'connected'
+      ? `Publishing ${status.sessions.map((s) => `/${s.namespace}`).join(', ')} to ${status.url}`
+      : (status.error ?? `Connecting to ${status.url}…`)
+  return (
+    <span title={title}>
+      <Badge tone={tone}>
+        ROS 2 {status.state === 'connected' ? `· ${rate.toFixed(0)} msg/s` : status.state === 'error' ? '· offline' : '· connecting'}
+      </Badge>
+    </span>
   )
 }
 
