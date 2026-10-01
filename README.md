@@ -1,7 +1,7 @@
 
 <p align="center">
   <a href="https://rebeldot.com">
-    <img src="assets/logo/rebeldot-logo-tagline-white-yellow@3x.png" alt="RebelDot — Physical AI department" width="320">
+    <img src="assets/logo/rebeldot-logo-tagline-on-black.png" alt="RebelDot — Physical AI department" width="380">
   </a>
 </p>
 
@@ -459,6 +459,6 @@ publishing a build, and swap the wordmarks for your own.
 
 <p align="center">
   <a href="https://rebeldot.com">
-    <img src="assets/logo/rebeldot-logo-tagline-white-yellow@3x.png" alt="RebelDot — Physical AI department" width="320">
+    <img src="assets/logo/rebeldot-logo-tagline-on-black.png" alt="RebelDot — Physical AI department" width="380">
   </a>
 </p>
