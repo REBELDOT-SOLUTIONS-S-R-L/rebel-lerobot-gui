@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { bridge } from './bridge/bridge-client'
 import { registerIpc } from './ipc'
-import { assetsDir, defaultCalibrationDir, isMac } from './paths'
+import { assetsDir, isMac } from './paths'
 import { runner } from './runner/process-runner'
 import { isSafeName, thumbnailsDir } from './stores/demos'
 import { settings } from './stores/settings'
@@ -123,13 +123,15 @@ app.whenReady().then(() => {
   registerThumbnailProtocol()
   registerIpc()
 
-  // Make the default calibration directory real so the file dialogs can open it
-  // and `--robot.calibration_dir` never points somewhere that does not exist.
-  const dir = settings().get().defaultCalibrationDir || defaultCalibrationDir()
-  try {
-    mkdirSync(dir, { recursive: true })
-  } catch (err) {
-    console.error(`[main] could not create ${dir}:`, err)
+  // Make the default calibration and dataset folders real, so the file dialogs
+  // can open them and `--robot.calibration_dir` never points nowhere.
+  const { defaultCalibrationDir, defaultDatasetRoot } = settings().get()
+  for (const dir of [defaultCalibrationDir, defaultDatasetRoot]) {
+    try {
+      mkdirSync(dir, { recursive: true })
+    } catch (err) {
+      console.error(`[main] could not create ${dir}:`, err)
+    }
   }
 
   createWindow()

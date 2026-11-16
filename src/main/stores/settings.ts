@@ -1,19 +1,37 @@
 import { DEFAULT_ROSBRIDGE_URL } from '@shared/ros'
 import type { AppSettings, DeviceProfile } from '@shared/types'
 import { VIRTUAL_ID, isVirtual, virtualProfile } from '@shared/virtual'
-import { defaultCalibrationDir, defaultDatasetRoot } from '../paths'
+import {
+  CALIBRATION_FOLDER,
+  DATASET_FOLDER,
+  fromProjectRelative,
+  projectRoot,
+  relocateProjectFolder,
+  toProjectRelative
+} from '../paths'
 import { JsonStore } from './json-store'
 
-let settingsStore: JsonStore<AppSettings> | null = null
-let profilesStore: JsonStore<{ profiles: DeviceProfile[] }> | null = null
+/**
+ * Settings and device profiles, with their folders kept relative to the project.
+ *
+ * On disk, a folder inside the project is stored relative to it (`calibration`,
+ * `data`), so the defaults follow the project when it is moved or cloned again.
+ * Everything that reads these stores still gets absolute paths: the conversion
+ * happens here and nowhere else.
+ */
+
+type Profiles = { profiles: DeviceProfile[] }
+
+/** Where datasets went before `data/` existed. */
+const OLD_DATASET_FOLDERS = ['samples'] as const
 
 function defaults(): AppSettings {
   return {
     pythonPath: null,
     venvPath: null,
     lerobotSourcePath: null,
-    defaultCalibrationDir: defaultCalibrationDir(),
-    defaultDatasetRoot: defaultDatasetRoot(),
+    defaultCalibrationDir: CALIBRATION_FOLDER,
+    defaultDatasetRoot: DATASET_FOLDER,
     preferUv: false,
     theme: 'dark',
     sidebarWidths: { configure: 380, view3d: 340, teleoperate: 420, replay: 420, infer: 420 },
@@ -21,14 +39,95 @@ function defaults(): AppSettings {
   }
 }
 
+class SettingsStore {
+  constructor(private readonly store: JsonStore<AppSettings>) {
+    // Repair, once, folders stored as absolute paths into where the project used to be.
+    const raw = store.get()
+    const root = projectRoot()
+    const repaired = {
+      defaultCalibrationDir: relocateProjectFolder(raw.defaultCalibrationDir, root, CALIBRATION_FOLDER),
+      defaultDatasetRoot: relocateProjectFolder(
+        raw.defaultDatasetRoot,
+        root,
+        DATASET_FOLDER,
+        undefined,
+        OLD_DATASET_FOLDERS
+      )
+    }
+    if (
+      repaired.defaultCalibrationDir !== raw.defaultCalibrationDir ||
+      repaired.defaultDatasetRoot !== raw.defaultDatasetRoot
+    ) {
+      store.set(repaired)
+    }
+  }
+
+  get(): AppSettings {
+    const raw = this.store.get()
+    const root = projectRoot()
+    return {
+      ...raw,
+      defaultCalibrationDir: fromProjectRelative(raw.defaultCalibrationDir || CALIBRATION_FOLDER, root),
+      defaultDatasetRoot: fromProjectRelative(raw.defaultDatasetRoot || DATASET_FOLDER, root)
+    }
+  }
+
+  set(patch: Partial<AppSettings>): AppSettings {
+    const root = projectRoot()
+    const stored = { ...patch }
+    if (patch.defaultCalibrationDir !== undefined) {
+      stored.defaultCalibrationDir = toProjectRelative(patch.defaultCalibrationDir, root)
+    }
+    if (patch.defaultDatasetRoot !== undefined) {
+      stored.defaultDatasetRoot = toProjectRelative(patch.defaultDatasetRoot, root)
+    }
+    this.store.set(stored)
+    return this.get()
+  }
+}
+
+class ProfilesStore {
+  constructor(private readonly store: JsonStore<Profiles>) {
+    const root = projectRoot()
+    const raw = store.get().profiles
+    const repaired = raw.map((p) => ({
+      ...p,
+      calibrationDir: relocateProjectFolder(p.calibrationDir, root, CALIBRATION_FOLDER)
+    }))
+    if (repaired.some((p, i) => p.calibrationDir !== raw[i].calibrationDir)) {
+      store.replace({ profiles: repaired })
+    }
+  }
+
+  get(): Profiles {
+    const root = projectRoot()
+    return {
+      profiles: this.store
+        .get()
+        .profiles.map((p) => ({ ...p, calibrationDir: fromProjectRelative(p.calibrationDir, root) }))
+    }
+  }
+
+  replace(next: Profiles): Profiles {
+    const root = projectRoot()
+    this.store.replace({
+      profiles: next.profiles.map((p) => ({ ...p, calibrationDir: toProjectRelative(p.calibrationDir, root) }))
+    })
+    return this.get()
+  }
+}
+
+let settingsStore: SettingsStore | null = null
+let profilesStore: ProfilesStore | null = null
+
 /** Lazily constructed: `app.getPath('userData')` is only valid after `ready`. */
-export function settings(): JsonStore<AppSettings> {
-  settingsStore ??= new JsonStore<AppSettings>('settings', defaults())
+export function settings(): SettingsStore {
+  settingsStore ??= new SettingsStore(new JsonStore<AppSettings>('settings', defaults()))
   return settingsStore
 }
 
-export function profiles(): JsonStore<{ profiles: DeviceProfile[] }> {
-  profilesStore ??= new JsonStore<{ profiles: DeviceProfile[] }>('profiles', { profiles: [] })
+export function profiles(): ProfilesStore {
+  profilesStore ??= new ProfilesStore(new JsonStore<Profiles>('profiles', { profiles: [] }))
   return profilesStore
 }
 
@@ -42,7 +141,7 @@ export function profiles(): JsonStore<{ profiles: DeviceProfile[] }> {
  * is special.
  */
 export function listProfiles(): DeviceProfile[] {
-  const dir = settings().get().defaultCalibrationDir || defaultCalibrationDir()
+  const dir = settings().get().defaultCalibrationDir
   return [virtualProfile(dir), ...profiles().get().profiles]
 }
 

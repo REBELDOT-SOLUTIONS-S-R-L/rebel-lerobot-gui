@@ -4,6 +4,7 @@ import type {
   BusPresence,
   BusSnapshot,
   CalibrationFile,
+  CameraBinding,
   CameraInfo,
   CommandSpec,
   DatasetMeta,
@@ -26,6 +27,14 @@ import type {
 import type { Demo, DemoDraft } from '@shared/demos'
 import { DEFAULT_ROSBRIDGE_URL, type RosAttachRequest, type RosStatus } from '@shared/ros'
 import { THUMBNAIL_EXTENSIONS } from '@shared/demos'
+import {
+  lerobotUnsupported,
+  teleopSides,
+  type RecordRequest,
+  type RigStartRequest,
+  type RigStartResult,
+  type RigStatus
+} from '@shared/rig'
 import { drivenInApp } from '@shared/teleop-input'
 import { isVirtual } from '@shared/virtual'
 import { BrowserWindow, dialog, ipcMain, shell } from 'electron'
@@ -83,6 +92,7 @@ import {
 } from './stores/settings'
 import { probeRosbridge } from './ros/rosbridge-client'
 import { rosClient, rosPublisher } from './ros'
+import { rig } from './rig'
 import { virtualBus } from './virtual-bus'
 
 /**
@@ -563,6 +573,7 @@ export function registerIpc(): void {
   )
   handle('motor:move', (uid: string, motor: string, position: number) => {
     rosPublisher.command(uid, { [motor]: position })
+    if (rig.goals(uid, { [motor]: position })) return { motor, goal: position }
     return isVirtual(uid)
       ? virtualBus.move(motor, position)
       : bridge.request('motor.move', { motor, position }, 15_000)
@@ -578,9 +589,31 @@ export function registerIpc(): void {
    */
   handle('motor:moveMany', (uid: string, positions: Record<string, number>) => {
     rosPublisher.command(uid, positions)
+    // An arm in the teleoperation rig is written by its loop, not the single-arm session.
+    if (rig.goals(uid, positions)) return { written: Object.keys(positions) }
     return isVirtual(uid)
       ? virtualBus.moveMany(positions)
       : bridge.request<{ written: string[] }>('motor.moveMany', { positions }, 15_000)
+  })
+
+  /* -- teleoperation rig and recording ------------------------------- */
+
+  handle('rig:start', (req: RigStartRequest): Promise<RigStartResult> => rig.start(req))
+  handle('rig:stop', async (): Promise<RigStatus> => {
+    await rig.stop()
+    return rig.status
+  })
+  handle('rig:status', (): RigStatus => rig.status)
+  handle('rig:recordStart', (req: RecordRequest): Promise<RigStatus> => rig.recordStart(req))
+  handle('rig:recordStop', (discard?: boolean): Promise<RigStatus> => rig.recordStop(!!discard))
+
+  // A live feed for one camera, keyed by whatever the panel calls it. Null stops it.
+  handle('camera:preview', async (id: string, binding: CameraBinding | null) => {
+    if (!binding) {
+      return bridge.running ? bridge.request('camera.preview', { id, binding: null }) : { previewing: false }
+    }
+    await bridge.ensure(requireVenv())
+    return bridge.request('camera.preview', { id, binding }, 30_000)
   })
 
   /* -- ROS 2 -------------------------------------------------------- */
@@ -707,6 +740,8 @@ export function registerIpc(): void {
   runner.on('output', (payload) => broadcast('run:output', payload))
   runner.on('status', (info) => broadcast('run:status', info))
   bridge.on('notification', (frame) => {
+    // The rig's frames go out as `rig:frame`, merged with the virtual arm's.
+    if (rig.onBridgeNotification(frame)) return
     broadcast('bridge:notification', frame)
     if (frame.type === 'positions' && frame.source !== 'virtual') {
       rosPublisher.positions('bus', frame.positions as Record<string, number>)
@@ -716,12 +751,21 @@ export function registerIpc(): void {
   // panel reading positions does not care which arm it is watching.
   virtualBus.on('notification', (frame) => {
     broadcast('bridge:notification', frame)
-    if (frame.type === 'positions') rosPublisher.positions('virtual', frame.positions)
+    if (frame.type === 'positions') {
+      rosPublisher.positions('virtual', frame.positions)
+      rig.onVirtualPositions(frame.positions)
+    }
   })
+  rig.on('frames', (frames) => broadcast('rig:frame', frames))
+  rig.on('status', (status: RigStatus) => broadcast('rig:status', status))
+  rig.on('error', (message: string) => broadcast('rig:error', message))
   rosPublisher.on('status', (status: RosStatus) => broadcast('ros:status', status))
   rosClient.on('log', (text: string) => broadcast('bridge:log', text))
   bridge.on('log', (text) => broadcast('bridge:log', text))
-  bridge.on('closed', (payload) => broadcast('bridge:closed', payload))
+  bridge.on('closed', (payload) => {
+    rig.onBridgeClosed()
+    broadcast('bridge:closed', payload)
+  })
   bridge.on('ready', (payload) => broadcast('bridge:ready', payload))
 }
 
@@ -760,6 +804,8 @@ function buildCommand(kind: RunKind, payload: unknown): CommandSpec {
           'This setup is driven by the app itself, so there is no LeRobot command to run.'
         )
       }
+      const unsupported = lerobotUnsupported(teleopSides(opts))
+      if (unsupported) throw new Error(unsupported)
       const devices = resolveTeleopDevices(opts)
       return opts.record
         ? buildRecordCommand(resolver(), opts, devices)

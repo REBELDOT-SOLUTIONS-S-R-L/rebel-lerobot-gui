@@ -108,8 +108,10 @@ export class BridgeClient extends EventEmitter {
         this.emit('log', `[bridge] unparseable frame: ${line.slice(0, 400)}\n`)
         continue
       }
-      if (frame.id === undefined || frame.id === null) {
-        // Notification: positions, rom, streamError, ready.
+      // Every reply carries `ok`; no notification does. Telling them apart by `id`
+      // alone dropped any notification that happened to have a field of that name.
+      if (typeof frame.ok !== 'boolean') {
+        // Notification: positions, rom, streamError, cameraFrame, rigFrame, ready.
         this.emit('notification', frame)
         continue
       }
@@ -161,10 +163,18 @@ export class BridgeClient extends EventEmitter {
   /** Best-effort tidy-up so motors are never left torqued on quit. */
   async shutdown(): Promise<void> {
     if (this.running) {
-      try {
-        await this.request('bus.close', {}, 5000)
-      } catch {
-        // Nothing useful to do — we are on the way out.
+      // Release any arm still being driven before the sidecar is killed: a
+      // killed process closes its ports but leaves the motors holding torque.
+      // Generous, because stopping also saves an episode being recorded.
+      for (const [method, timeout] of [
+        ['rig.stop', 60_000],
+        ['bus.close', 5_000]
+      ] as const) {
+        try {
+          await this.request(method, {}, timeout)
+        } catch {
+          // Nothing useful to do — we are on the way out.
+        }
       }
     }
     this.stop()

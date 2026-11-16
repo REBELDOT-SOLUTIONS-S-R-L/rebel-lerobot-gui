@@ -43,7 +43,6 @@ import {
   type PadSnapshot
 } from '@shared/teleop-input'
 import { parseUrdfJoints } from '@shared/urdf'
-import { VIRTUAL_UID } from '@shared/virtual'
 import { describe, expect, it } from 'vitest'
 
 const IK_JOINTS = MOTOR_NAMES.filter((name) => name !== 'gripper')
@@ -76,14 +75,9 @@ function withButton(index: number, value = 1): PadSnapshot {
 }
 
 describe('drivenInApp', () => {
-  it('leaves a leader driving a real follower to lerobot-teleoperate', () => {
-    expect(drivenInApp({ controller: 'leader', robotUid: 'p-1' })).toBe(false)
-  })
-
-  it('takes over for the virtual arm and for the two tool controllers', () => {
-    expect(drivenInApp({ controller: 'leader', robotUid: VIRTUAL_UID })).toBe(true)
-    expect(drivenInApp({ controller: 'keyboard', robotUid: 'p-1' })).toBe(true)
-    expect(drivenInApp({ controller: 'gamepad', robotUid: 'p-1' })).toBe(true)
+  it('runs every setup in the app unless a LeRobot command is asked for', () => {
+    expect(drivenInApp({ runner: 'app' })).toBe(true)
+    expect(drivenInApp({ runner: 'lerobot' })).toBe(false)
   })
 })
 

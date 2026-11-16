@@ -122,6 +122,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       // Unlike a demo, a ROS session belongs to a panel, and a reload lost it.
       attempt(api.ros.reset())
     ])
+    // So does the teleoperation rig: nothing is left on screen to stop it with.
+    void attempt(api.rig.stop())
     set({
       rosStatus: rosStatus.value ?? null,
       appInfo: info.value ?? null,

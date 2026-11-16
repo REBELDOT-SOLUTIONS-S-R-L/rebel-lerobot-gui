@@ -5,6 +5,7 @@ import type {
   BusPresence,
   BusSnapshot,
   CalibrationFile,
+  CameraBinding,
   CameraInfo,
   CommandSpec,
   DatasetMeta,
@@ -25,6 +26,14 @@ import type {
 } from '@shared/types'
 import type { Demo, DemoDraft } from '@shared/demos'
 import type { RosAttachRequest, RosStatus } from '@shared/ros'
+import type {
+  CameraFrame,
+  RecordRequest,
+  RigFrame,
+  RigStartRequest,
+  RigStartResult,
+  RigStatus
+} from '@shared/rig'
 import { contextBridge, ipcRenderer } from 'electron'
 
 type Unsubscribe = () => void
@@ -221,6 +230,35 @@ const api = {
     onOutput: (cb: (payload: { runId: string; data: string }) => void) =>
       on<{ runId: string; data: string }>('run:output', cb),
     onStatus: (cb: (info: RunInfo) => void) => on<RunInfo>('run:status', cb)
+  },
+
+  /** The teleoperation rig: the app driving one or two arms, and recording them. */
+  rig: {
+    start: (req: RigStartRequest) => invoke<RigStartResult>('rig:start', req),
+    stop: () => invoke<RigStatus>('rig:stop'),
+    status: () => invoke<RigStatus>('rig:status'),
+    recordStart: (req: RecordRequest) => invoke<RigStatus>('rig:recordStart', req),
+    /** `discard` drops the episode instead of saving it. */
+    recordStop: (discard?: boolean) => invoke<RigStatus>('rig:recordStop', discard),
+    onFrame: (cb: (frames: RigFrame[]) => void) => on<RigFrame[]>('rig:frame', cb),
+    onStatus: (cb: (status: RigStatus) => void) => on<RigStatus>('rig:status', cb),
+    onError: (cb: (message: string) => void) => on<string>('rig:error', cb)
+  },
+
+  /** Live camera feeds, shared with the rig when it records the same camera. */
+  camera: {
+    /** Start a feed under `id`, or stop it with a null binding. */
+    preview: (id: string, binding: CameraBinding | null) =>
+      invoke<{ previewing: boolean }>('camera:preview', id, binding),
+    onFrame: (cb: (frame: CameraFrame) => void) =>
+      on<Record<string, unknown>>('bridge:notification', (frame) => {
+        if (frame.type === 'cameraFrame') cb(frame as unknown as CameraFrame)
+      }),
+    /** A feed that opened but stopped delivering frames. */
+    onError: (cb: (error: { preview: string; message: string }) => void) =>
+      on<Record<string, unknown>>('bridge:notification', (frame) => {
+        if (frame.type === 'cameraError') cb(frame as unknown as { preview: string; message: string })
+      })
   },
 
   /** ROS 2 telemetry over rosbridge. See `@shared/ros` for the topics. */

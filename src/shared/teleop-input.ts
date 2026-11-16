@@ -13,24 +13,19 @@
  * bottom of this file.
  */
 
-import type { TeleopController } from './types'
-import { isVirtual } from './virtual'
+import type { TeleoperateOptions } from './types'
 
 /**
- * Whether the app drives this run itself, instead of starting a LeRobot process.
+ * Whether the app drives this setup itself, instead of starting a LeRobot process.
  *
- * `lerobot-teleoperate` is the right tool for a leader driving a real follower
- * and nothing here replaces it. It cannot help with the other two cases: it has
- * no device for the virtual arm, and its keyboard and gamepad teleoperators emit
- * three-axis position deltas that nothing in the shipped release turns into
- * joint angles. Both are then run from here — read a pose or a command, solve,
- * write goals — which is also why recording is only offered on the CLI path.
+ * The app runs every setup by default — leader arms included, through LeRobot's
+ * own device classes in the sidecar — because that is what lets recording start
+ * and stop on demand, and the 3D view, camera feeds and ROS 2 follow the arms.
+ * `lerobot-teleoperate` / `lerobot-record` remain available for a leader-only
+ * setup when asked for (`@shared/rig`'s `lerobotUnsupported` says when).
  */
-export function drivenInApp(opts: {
-  controller: TeleopController
-  robotUid: string | null
-}): boolean {
-  return opts.controller !== 'leader' || isVirtual(opts.robotUid)
+export function drivenInApp(opts: Pick<TeleoperateOptions, 'runner'>): boolean {
+  return opts.runner !== 'lerobot'
 }
 
 /** The tool's six degrees of freedom, in the order the UI lists them. */

@@ -429,16 +429,34 @@ export type TeleopController = 'leader' | 'keyboard' | 'gamepad'
 export type EeController = Exclude<TeleopController, 'leader'>
 
 export interface TeleoperateOptions {
-  controller: TeleopController
   setup: 'single' | 'dual'
-  /** Single setup. */
+  /**
+   * Who runs the loop. `app` drives every setup itself and can record on demand;
+   * `lerobot` hands a leader-only setup to `lerobot-teleoperate` / `lerobot-record`.
+   */
+  runner: 'app' | 'lerobot'
+  /** Single setup: controller, arms and camera. */
+  controller: TeleopController
   robotUid: string | null
   leaderUid: string | null
-  /** Dual setup — left/right pairs. */
+  /** Key of one of the follower profile's cameras, or null for none. */
+  cameraKey: string | null
+  showCamera: boolean
+  /** Dual setup — each side chooses its own controller, arms and camera. */
+  leftController: TeleopController
+  rightController: TeleopController
   leftRobotUid: string | null
   rightRobotUid: string | null
   leftLeaderUid: string | null
   rightLeaderUid: string | null
+  leftCameraKey: string | null
+  rightCameraKey: string | null
+  leftShowCamera: boolean
+  rightShowCamera: boolean
+  /** Base-to-base distance between the two arms in the 3D view, in centimetres. */
+  armSpacingCm: number
+  /** Start recording when driving starts, and stop when it stops. */
+  autoRecord: boolean
   /** Shared id for the bimanual device (children become `<id>_left` / `_right`). */
   bimanualRobotId: string
   bimanualLeaderId: string

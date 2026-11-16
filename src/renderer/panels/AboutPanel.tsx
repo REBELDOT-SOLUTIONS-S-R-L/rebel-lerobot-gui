@@ -210,7 +210,8 @@ function HowTo(): ReactNode {
               </Term>
               <Term name="3D View">The follower’s own 3D model, posed from what its motors report.</Term>
               <Term name="Teleoperate">
-                Drive a follower from a leader arm, the keyboard or a gamepad, and record a dataset.
+                Drive one arm or two from leader arms, the keyboard or gamepads, watch them in 3D with
+                their cameras, and record episodes for training.
               </Term>
               <Term name="Replay">Play a recorded episode back on an arm.</Term>
               <Term name="Infer">Run a trained policy on an arm.</Term>
@@ -285,10 +286,16 @@ function HowTo(): ReactNode {
           <Topic title="6. Run something">
             <Terms>
               <Term name="Teleoperate">
-                Pick the <b>Robot (follower)</b> and the <b>Leader (teleop)</b>, optionally cameras and <b>Record</b> with
-                a dataset, then press <b>Start teleoperation</b> (or <b>Start recording</b>). While
-                recording, click the output and use <Kbd>→</Kbd> to keep an episode, <Kbd>←</Kbd> to
-                redo it and <Kbd>Esc</Kbd> to finish.
+                Choose <b>Single arm</b> or <b>Dual arms</b>. For each arm pick a controller (leader
+                arm, keyboard or gamepad), the leader if it has one, the follower, and optionally a
+                camera with <b>Show camera feed</b>. In dual mode the 3D view shows both arms, with a{' '}
+                <b>Spacing</b> slider (10–80 cm). Press <b>Start driving</b>.
+              </Term>
+              <Term name="Record">
+                Fill in the dataset name, folder and task, then press <b>Start recording</b> and{' '}
+                <b>Stop recording</b> while driving: each start and stop saves one episode of a LeRobot
+                dataset. <b>Record automatically while driving</b> makes each drive one episode.
+                Recording into an existing dataset adds episodes to it.
               </Term>
               <Term name="Keyboard / gamepad">
                 In Teleoperate, set the controller to Keyboard or Gamepad and press{' '}
@@ -413,8 +420,8 @@ function HowTo(): ReactNode {
             </div>
             <Prose>
               <p>
-                LeRobot commands (teleoperation from a leader, recording, replay onto a real arm,
-                inference and demos) hold the serial port themselves, so they do not publish yet.
+                LeRobot commands (Teleoperate with <b>Run as a LeRobot command</b> on, replay onto a real
+                arm, inference and demos) hold the serial port themselves, so they do not publish yet.
               </p>
             </Prose>
           </Topic>

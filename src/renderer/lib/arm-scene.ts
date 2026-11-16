@@ -1,6 +1,6 @@
 import { assetUrl } from '@shared/assets'
 import type { ArmModel } from '@shared/devices'
-import { SIM_MANIFESTS, type SimManifest } from '@shared/sim'
+import { BASE_YAW, SIM_MANIFESTS, type SimManifest } from '@shared/sim'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
@@ -49,6 +49,34 @@ interface Joint {
   target: number
 }
 
+/** One arm in the scene. */
+interface Arm {
+  manifest: SimManifest
+  /** Holds the glb, and is what a pair layout turns and moves. */
+  group: THREE.Group
+  model: THREE.Object3D
+  joints: Joint[]
+}
+
+/**
+ * How the arms stand.
+ *
+ * `single` is the arm as the build script framed it. `pair` is a bimanual
+ * station: both arms turned to reach the same way (+X, by `BASE_YAW`), the first
+ * on the operator's left and the second on the right, seen from behind them —
+ * so left on screen is the left arm, as it is at the bench.
+ */
+export type SceneLayout = 'single' | 'pair'
+
+/**
+ * Where a pair is looked at from: behind and above, a little off to the right
+ * so an arm reaching away still shows its shape. Left stays on the left.
+ */
+const PAIR_VIEW = {
+  direction: new THREE.Vector3(-1, 0.7, 0.42).normalize(),
+  target: new THREE.Vector3(0.12, 0.1, 0)
+}
+
 export class ArmScene {
   private readonly renderer: THREE.WebGLRenderer
   private readonly scene = new THREE.Scene()
@@ -60,10 +88,13 @@ export class ArmScene {
   /** Last size handed to the renderer, so a no-op resize is not acted on. */
   private size = { width: 0, height: 0 }
 
-  private manifest: SimManifest | null = null
-  private model: THREE.Object3D | null = null
+  private arms: (Arm | null)[] = []
+  private layout: SceneLayout = 'single'
+  /** Base-to-base distance of a pair, in metres. */
+  private spacing = 0.3
   private ground: THREE.Mesh | null = null
-  private joints: Joint[] = []
+  /** The camera has been moved by hand, so a new spacing must not snap it back. */
+  private userMoved = false
   private theme: SceneTheme = 'dark'
   private dirty = true
   private disposed = false
@@ -93,6 +124,7 @@ export class ArmScene {
     // surface the arm is standing on, which reads as a bug.
     this.controls.maxPolarAngle = Math.PI / 2 - 0.03
     this.controls.addEventListener('change', () => (this.dirty = true))
+    this.controls.addEventListener('start', () => (this.userMoved = true))
 
     this.observer = new ResizeObserver(() => this.resize())
     this.observer.observe(canvas.parentElement ?? canvas)
@@ -101,60 +133,92 @@ export class ArmScene {
     this.renderer.setAnimationLoop(() => this.tick())
   }
 
-  /** Fetch and build a model's scene. Replaces whatever was loaded before. */
+  /** Fetch and build one arm. Replaces whatever was loaded before. */
   async load(manifest: SimManifest): Promise<void> {
-    const gltf = await new GLTFLoader().loadAsync(assetUrl(manifest.glb))
+    await this.loadArms([manifest], 'single')
+  }
+
+  /**
+   * Fetch and build several arms. A null slot leaves its place empty, so in a
+   * pair the left arm stays on the left while the right one is still unchosen.
+   */
+  async loadArms(manifests: (SimManifest | null)[], layout: SceneLayout): Promise<void> {
+    const loaded = await Promise.all(
+      manifests.map((m) => (m ? new GLTFLoader().loadAsync(assetUrl(m.glb)) : Promise.resolve(null)))
+    )
     if (this.disposed) return
 
     this.clear()
-    this.manifest = manifest
-    this.model = gltf.scene
-    this.scene.add(gltf.scene)
+    this.layout = layout
+    const first = manifests.find((m): m is SimManifest => m !== null) ?? null
 
-    this.ground = null
-    gltf.scene.traverse((object) => {
-      if (!(object instanceof THREE.Mesh)) return
-      if (object.name === manifest.groundNode) {
-        this.ground = object
-        object.receiveShadow = true
-      } else {
-        object.castShadow = true
-        object.receiveShadow = true
-      }
-    })
+    this.arms = loaded.map((gltf, index) => {
+      const manifest = manifests[index]
+      if (!gltf || !manifest) return null
+      const group = new THREE.Group()
+      group.add(gltf.scene)
+      this.scene.add(group)
 
-    this.joints = manifest.joints.flatMap((joint) => {
-      const node = gltf.scene.getObjectByName(joint.node)
-      if (!node) {
-        console.warn(`[3d] ${manifest.model}: no node '${joint.node}' for joint '${joint.name}'`)
-        return []
-      }
-      return [
-        {
-          name: joint.name,
-          node,
-          axis: new THREE.Vector3(...joint.axis).normalize(),
-          rest: node.quaternion.clone(),
-          current: 0,
-          target: 0
+      gltf.scene.traverse((object) => {
+        if (!(object instanceof THREE.Mesh)) return
+        if (object.name !== manifest.groundNode) {
+          object.castShadow = true
+          object.receiveShadow = true
         }
-      ]
+      })
+      // One surface for the whole scene: the first arm's, kept at the origin
+      // rather than moving with its arm.
+      const ground = gltf.scene.getObjectByName(manifest.groundNode)
+      if (ground instanceof THREE.Mesh) {
+        if (!this.ground) {
+          ground.receiveShadow = true
+          this.ground = ground
+          // `attach` keeps where it is in the world; the arms have not moved yet.
+          this.scene.attach(ground)
+        } else {
+          ground.removeFromParent()
+          disposeMesh(ground)
+        }
+      }
+
+      const joints = manifest.joints.flatMap((joint) => {
+        const node = gltf.scene.getObjectByName(joint.node)
+        if (!node) {
+          console.warn(`[3d] ${manifest.model}: no node '${joint.node}' for joint '${joint.name}'`)
+          return []
+        }
+        return [
+          {
+            name: joint.name,
+            node,
+            axis: new THREE.Vector3(...joint.axis).normalize(),
+            rest: node.quaternion.clone(),
+            current: 0,
+            target: 0
+          }
+        ]
+      })
+      return { manifest, group, model: gltf.scene, joints }
     })
 
-    this.addLights(manifest)
+    this.placeArms()
+    if (first) this.addLights(first)
     this.applyTheme()
+    this.userMoved = false
     this.resetView()
   }
 
   /**
-   * Target angle per joint, in radians.
+   * Target angle per joint, in radians, for one arm (the first by default).
    *
    * Angles are eased rather than written straight through: the bus streams at
    * 10-30 Hz with a tick or two of jitter, and stepping to each reading makes a
    * still arm look like it is shivering.
    */
-  setPose(pose: Record<string, number>, opts: { immediate?: boolean } = {}): void {
-    for (const joint of this.joints) {
+  setPose(pose: Record<string, number>, opts: { immediate?: boolean; arm?: number } = {}): void {
+    const arm = this.arms[opts.arm ?? 0]
+    if (!arm) return
+    for (const joint of arm.joints) {
       const angle = pose[joint.name]
       if (typeof angle !== 'number' || Number.isNaN(angle)) continue
       joint.target = angle
@@ -163,14 +227,29 @@ export class ArmScene {
     this.dirty = true
   }
 
+  /** Base-to-base distance of a pair, in metres. */
+  setSpacing(metres: number): void {
+    if (metres === this.spacing) return
+    this.spacing = metres
+    this.placeArms()
+    // Keep both arms in frame, unless the camera has been placed by hand.
+    if (this.layout === 'pair' && !this.userMoved) this.framePair()
+    this.dirty = true
+  }
+
   setTheme(theme: SceneTheme): void {
     this.theme = theme
     this.applyTheme()
   }
 
-  /** Back to the framing the build script chose. */
+  /** Back to the default framing. */
   resetView(): void {
-    const camera = this.manifest?.camera
+    this.userMoved = false
+    if (this.layout === 'pair') {
+      this.framePair()
+      return
+    }
+    const camera = this.arms.find((a) => a)?.manifest.camera
     if (!camera) return
     this.camera.fov = camera.fov
     this.camera.position.set(...camera.position)
@@ -196,6 +275,46 @@ export class ArmScene {
   }
 
   /* -- internals ---------------------------------------------------- */
+
+  /** Turn and space a pair; a single arm stands where the build script put it. */
+  private placeArms(): void {
+    this.arms.forEach((arm, index) => {
+      if (!arm) return
+      if (this.layout === 'single') {
+        arm.group.position.set(0, 0, 0)
+        arm.group.rotation.set(0, 0, 0)
+        return
+      }
+      // glTF is Y-up; the URDF's +Y — the arm's left when it reaches along +X —
+      // is glTF's -Z.
+      const side = index === 0 ? -1 : 1
+      arm.group.rotation.set(0, BASE_YAW[arm.manifest.model], 0)
+      arm.group.position.set(0, 0, (side * this.spacing) / 2)
+    })
+    this.dirty = true
+  }
+
+  /** Frame a pair from behind, far enough out to see both at this spacing. */
+  private framePair(): void {
+    const radius = Math.max(...this.arms.map((a) => a?.manifest.camera.radius ?? 0.3))
+    const fov = 38
+    const halfWidth = this.spacing / 2 + radius * 1.4
+    const aspect = Math.max(0.6, this.camera.aspect || 1.5)
+    const vertical = (fov * Math.PI) / 360
+    const distance = Math.max(
+      radius * 2.6,
+      halfWidth / (Math.tan(vertical) * aspect),
+      (radius * 1.6) / Math.tan(vertical)
+    )
+    this.camera.fov = fov
+    this.controls.target.copy(PAIR_VIEW.target)
+    this.camera.position.copy(PAIR_VIEW.target).addScaledVector(PAIR_VIEW.direction, distance)
+    this.controls.minDistance = distance * ZOOM_RANGE[0]
+    this.controls.maxDistance = distance * ZOOM_RANGE[1]
+    this.controls.update()
+    this.camera.updateProjectionMatrix()
+    this.dirty = true
+  }
 
   private addLights(manifest: SimManifest): void {
     const { ambient, hemisphere, key } = manifest.lighting
@@ -238,7 +357,7 @@ export class ArmScene {
     this.renderer.setClearColor(new THREE.Color(token || fallback))
 
     const ground = this.ground
-    const manifest = this.manifest
+    const manifest = this.arms.find((a) => a)?.manifest
     if (ground && manifest) {
       const colour = new THREE.Color(this.theme === 'light' ? manifest.ground.light : manifest.ground.dark)
       for (const material of Array.isArray(ground.material) ? ground.material : [ground.material]) {
@@ -262,6 +381,7 @@ export class ArmScene {
     this.renderer.setSize(width, height, true)
     this.camera.aspect = width / height
     this.camera.updateProjectionMatrix()
+    if (this.layout === 'pair' && !this.userMoved) this.framePair()
     this.dirty = true
   }
 
@@ -271,7 +391,7 @@ export class ArmScene {
     // whether the display is running at 60 Hz or 120.
     const blend = 1 - Math.exp(-dt / SMOOTHING_TAU)
 
-    for (const joint of this.joints) {
+    for (const joint of this.arms.flatMap((arm) => arm?.joints ?? [])) {
       const delta = joint.target - joint.current
       if (Math.abs(delta) < 1e-5) {
         if (joint.current !== joint.target) {
@@ -304,15 +424,20 @@ export class ArmScene {
       // Lights own GPU memory too: the key light's shadow map.
       if (child instanceof THREE.Light) child.dispose()
     }
-    this.model?.traverse((object) => {
-      if (!(object instanceof THREE.Mesh)) return
-      object.geometry.dispose()
-      for (const material of Array.isArray(object.material) ? object.material : [object.material]) {
-        material.dispose()
-      }
-    })
-    this.model = null
+    for (const arm of this.arms) {
+      arm?.model.traverse((object) => {
+        if (object instanceof THREE.Mesh) disposeMesh(object)
+      })
+    }
+    if (this.ground) disposeMesh(this.ground)
+    this.arms = []
     this.ground = null
-    this.joints = []
+  }
+}
+
+function disposeMesh(mesh: THREE.Mesh): void {
+  mesh.geometry.dispose()
+  for (const material of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
+    material.dispose()
   }
 }

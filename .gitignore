@@ -16,11 +16,12 @@ __pycache__/
 *.py[cod]
 
 # Local runtime state: real calibration files describe a particular arm, and
-# recorded datasets are large.
+# recorded datasets are large. The folders themselves are kept so the defaults
+# exist on a fresh clone.
 calibration/*.json
-samples/*
-!samples/.gitkeep
 !calibration/.gitkeep
+data/*
+!data/.gitkeep
 
 # Blender's optional working file (`build:sim --save-blend`) and its backups.
 # The built scenes it exports are committed; the .blend is not.

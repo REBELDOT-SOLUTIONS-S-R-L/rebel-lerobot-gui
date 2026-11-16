@@ -53,6 +53,11 @@ export interface EeDriveOptions {
   readings: Record<string, JointReading>
   /** Multiplier on the base speeds; 1 is normal. */
   speed: number
+  /**
+   * Which connected gamepad to read, in connection order. Two arms driven from
+   * two pads take one each; see `@shared/rig`'s `gamepadIndex`.
+   */
+  padIndex?: number
 }
 
 export interface EeDriveState {
@@ -99,24 +104,21 @@ const PUBLISH_HZ = 15
 /** Consecutive failed writes before the loop gives up and says so. */
 const WRITE_FAILURE_LIMIT = 3
 
-function readPad(): { snapshot: PadSnapshot; id: string } | null {
-  const pads = navigator.getGamepads?.() ?? []
-  for (const pad of pads) {
-    if (!pad?.connected) continue
-    return {
-      id: pad.id,
-      snapshot: {
-        axes: pad.axes,
-        buttons: pad.buttons.map((button) => button.value),
-        standard: pad.mapping === 'standard'
-      }
+function readPad(index = 0): { snapshot: PadSnapshot; id: string } | null {
+  const pad = (navigator.getGamepads?.() ?? []).filter((p) => p?.connected)[index]
+  if (!pad) return null
+  return {
+    id: pad.id,
+    snapshot: {
+      axes: pad.axes,
+      buttons: pad.buttons.map((button) => button.value),
+      standard: pad.mapping === 'standard'
     }
   }
-  return null
 }
 
 export function useEeDrive(opts: EeDriveOptions): EeDriveState {
-  const { uid, controller, engaged, kinematics, readings, speed } = opts
+  const { uid, controller, engaged, kinematics, readings, speed, padIndex = 0 } = opts
   const [state, setState] = useState<EeDriveState>(IDLE_STATE)
 
   // Latest-value refs: the loop is not a render, so it reads these rather than
@@ -201,7 +203,7 @@ export function useEeDrive(opts: EeDriveOptions): EeDriveState {
       const dt = Math.min((now - last) / 1000, 0.1)
       last = now
 
-      const pad = controller === 'gamepad' ? readPad() : null
+      const pad = controller === 'gamepad' ? readPad(padIndex) : null
       const command =
         controller === 'keyboard'
           ? commandFromKeys(pressed)
@@ -303,7 +305,7 @@ export function useEeDrive(opts: EeDriveOptions): EeDriveState {
     // `readings` and `speed` are read through refs on purpose; re-running the
     // effect for either would re-seed the loop from the arm mid-flight.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [engaged, uid, controller, kinematics])
+  }, [engaged, uid, controller, kinematics, padIndex])
 
   return state
 }

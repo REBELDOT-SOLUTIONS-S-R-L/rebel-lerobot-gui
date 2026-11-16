@@ -1,18 +1,24 @@
 import { app } from 'electron'
 import { join, resolve } from 'node:path'
+import { CALIBRATION_FOLDER, DATASET_FOLDER } from './fs-paths'
 
 /**
  * Electron-dependent locations. The pure helpers live in `fs-paths.ts` and are
  * re-exported here so callers only need one import.
  */
 export {
+  CALIBRATION_FOLDER,
+  DATASET_FOLDER,
   VENV_BIN,
   exeName,
   expandHome,
+  fromProjectRelative,
   isLinux,
   isMac,
   isWindows,
   lerobotHome,
+  relocateProjectFolder,
+  toProjectRelative,
   venvExists,
   venvPython,
   venvScript
@@ -51,9 +57,9 @@ export function bridgeScript(): string {
 }
 
 export function defaultCalibrationDir(): string {
-  return join(projectRoot(), 'calibration')
+  return join(projectRoot(), CALIBRATION_FOLDER)
 }
 
 export function defaultDatasetRoot(): string {
-  return join(projectRoot(), 'samples')
+  return join(projectRoot(), DATASET_FOLDER)
 }

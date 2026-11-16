@@ -22,7 +22,7 @@ files:
   - '!venv/**/*'
   - '!.venv/**/*'
   - '!calibration/**/*'
-  - '!samples/**/*'
+  - '!data/**/*'
   # Shipped through extraResources instead, so they are not also duplicated
   # inside the asar.
   - '!assets/**/*'

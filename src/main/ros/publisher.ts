@@ -176,7 +176,17 @@ export class RosPublisher extends EventEmitter {
         : this.busUid
           ? this.sessions.get(this.busUid)
           : undefined
-    if (!session || !this.deps.client.connected) return
+    if (session) this.publishPositions(session, ticks)
+  }
+
+  /** A position frame for a named device — what the teleoperation rig reports. */
+  positionsFor(uid: string, ticks: Record<string, number>): void {
+    const session = this.sessions.get(uid)
+    if (session) this.publishPositions(session, ticks)
+  }
+
+  private publishPositions(session: Session, ticks: Record<string, number>): void {
+    if (!this.deps.client.connected) return
     const now = this.now()
     this.deps.client.publish(
       topicPath(session.namespace, 'jointStates'),

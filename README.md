@@ -147,13 +147,26 @@ without ever measuring where it stops, so its zero is wherever the wrist was
 during calibration, and the URDF's limits for it describe cable length rather
 than anything the encoder knows.
 
-**Teleoperate** — drive a follower three ways.
+**Teleoperate** — drive one arm or two, and record them for training.
 
-- **Leader arm**, single or bimanual, optionally with cameras and the Rerun
-  dashboard: this is `lerobot-teleoperate`, and turning on *Record* switches the
-  run to `lerobot-record`. While recording, click the output pane and use
-  <kbd>→</kbd>/<kbd>n</kbd> to keep an episode, <kbd>←</kbd>/<kbd>r</kbd> to redo
-  it, <kbd>Esc</kbd>/<kbd>q</kbd> to finish.
+Pick **Single arm** or **Dual arms**. In dual mode each side — left and right —
+chooses its own controller, follower and camera, so a leader arm can drive one
+side while a gamepad drives the other. The 3D view shows both arms side by side
+with a spacing slider (10–80 cm), and each side's camera can be shown live.
+
+The app runs the loop itself: real arms through LeRobot's own `SOFollower` /
+`SOLeader` classes in the Python sidecar, the keyboard and gamepad through the
+app's solver, the virtual arm in process. **Start recording** / **Stop
+recording** while driving saves one episode each time, written with LeRobot's
+own dataset writer to `<dataset folder>/<dataset name>` — the same format
+`lerobot-record` produces, with `left_` / `right_` feature names for a pair as
+LeRobot's bimanual robots use. *Record automatically while driving* makes each
+drive one episode. A leader-only setup can still be handed to
+`lerobot-teleoperate` / `lerobot-record` with *Run as a LeRobot command*.
+
+The controllers:
+
+- **Leader arm** — a second arm, copied joint for joint in LeRobot's units.
 - **Keyboard** — <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> and
   <kbd>R</kbd>/<kbd>F</kbd> fly the tool around, <kbd>I</kbd><kbd>J</kbd><kbd>K</kbd><kbd>L</kbd>
   and <kbd>U</kbd>/<kbd>O</kbd> turn it, <kbd>,</kbd>/<kbd>.</kbd> work the jaws.
@@ -246,9 +259,12 @@ Two channels, deliberately separate:
   newline-delimited JSON-RPC over stdio — stdout is protocol only, all logging
   goes to stderr.
 
-Three things the app drives itself, because no LeRobot command can:
-keyboard and gamepad teleoperation, teleoperating the virtual arm, and replaying
-onto it. `lerobot-teleoperate` has no device for a simulated arm, and its
+Teleoperation runs in the app by default: the sidecar's rig loop drives real
+leaders and followers with LeRobot's own device classes and records with
+LeRobot's dataset writer, which is what lets recording start and stop on demand
+and the 3D view, camera feeds and ROS 2 follow every setup. Three things only
+the app can do at all: keyboard and gamepad teleoperation, teleoperating the
+virtual arm, and replaying onto it. `lerobot-teleoperate` has no device for a simulated arm, and its
 keyboard and gamepad teleoperators emit three-axis position deltas that nothing
 in the shipped release converts into joint angles. So the forward and inverse
 kinematics are in the app, in [src/shared/kinematics.ts](src/shared/kinematics.ts):
@@ -407,7 +423,7 @@ scripts/             the smoke test and the Blender build wrapper
 tests/               vitest suites (node environment — no DOM)
 build/               electron-builder resources; drop icons here
 calibration/         default calibration folder
-samples/             default dataset folder
+data/                default dataset folder: recordings land here (contents not committed)
 ```
 
 Motor indicator positions live in

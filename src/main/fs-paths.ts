@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 
 /**
  * Path helpers that do NOT touch Electron.
@@ -50,4 +50,68 @@ export function lerobotHome(): string {
 
 export function expandHome(p: string): string {
   return p.startsWith('~') ? join(homedir(), p.slice(1)) : p
+}
+
+/* ------------------------------------------------------------------ *
+ * Folders kept relative to the project                                *
+ * ------------------------------------------------------------------ */
+
+/** The project's own folder for calibration files. */
+export const CALIBRATION_FOLDER = 'calibration'
+
+/** The project's own folder for recorded datasets. */
+export const DATASET_FOLDER = 'data'
+
+/**
+ * A folder as it is stored: relative to the project when it is inside it,
+ * absolute otherwise.
+ *
+ * Settings and profiles used to store absolute paths, so moving or re-cloning
+ * the project left every one of them pointing at a folder that no longer
+ * existed. Stored relative, the project's own `calibration/` and `data/` follow
+ * it wherever it goes; a folder elsewhere on the disk is still remembered as is.
+ */
+export function toProjectRelative(path: string, root: string): string {
+  if (!path) return path
+  const absolute = resolve(expandHome(path))
+  const rel = relative(resolve(root), absolute)
+  if (rel === '') return '.'
+  if (rel.startsWith('..') || isAbsolute(rel)) return absolute
+  return rel.split(sep).join('/')
+}
+
+/** The inverse: a stored folder as an absolute path. */
+export function fromProjectRelative(stored: string, root: string): string {
+  if (!stored) return stored
+  const expanded = expandHome(stored)
+  return isAbsolute(expanded) ? expanded : join(root, expanded)
+}
+
+/**
+ * A stored folder, repaired if it belongs to a project that has since moved.
+ *
+ * An absolute path ending in one of the project's own folder names was that
+ * folder in the project's old location when it no longer exists, or when it sits
+ * in a folder named like the project (`…/rebel-lerobot-gui/calibration`) that is
+ * not this one — the app used to recreate its default folder there on every
+ * launch, so existing proves nothing. Either way it becomes the relative
+ * default. A folder of that name anywhere else is a deliberate choice and is
+ * kept. `renamed` lists older names for the same folder: datasets used to go in
+ * `samples/`.
+ */
+export function relocateProjectFolder(
+  stored: string,
+  root: string,
+  folder: string,
+  exists: (path: string) => boolean = existsSync,
+  renamed: readonly string[] = []
+): string {
+  if (!stored) return folder
+  const relativeForm = toProjectRelative(stored, root)
+  if (renamed.includes(relativeForm)) return folder
+  if (!isAbsolute(relativeForm)) return relativeForm
+  const name = basename(relativeForm)
+  if (name !== folder && !renamed.includes(name)) return relativeForm
+  const oldProject = basename(dirname(relativeForm)) === basename(resolve(root))
+  return oldProject || !exists(relativeForm) ? folder : relativeForm
 }

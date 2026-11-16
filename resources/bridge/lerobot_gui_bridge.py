@@ -38,6 +38,11 @@ from typing import Any, Callable
 
 _write_lock = threading.Lock()
 
+# The protocol's own handle on stdout. `main` points `sys.stdout` at stderr, so a
+# stray print() from a library — LeRobot prints during connect and calibration —
+# lands in the log instead of corrupting a frame.
+_PROTOCOL_OUT = sys.stdout
+
 
 def log(msg: str) -> None:
     print(f"[bridge] {msg}", file=sys.stderr, flush=True)
@@ -46,8 +51,8 @@ def log(msg: str) -> None:
 def _emit(obj: dict[str, Any]) -> None:
     line = json.dumps(obj, default=_json_default)
     with _write_lock:
-        sys.stdout.write(line + "\n")
-        sys.stdout.flush()
+        _PROTOCOL_OUT.write(line + "\n")
+        _PROTOCOL_OUT.flush()
 
 
 def _json_default(o: Any) -> Any:
@@ -1550,6 +1555,715 @@ def m_dataset_episode(
     }
 
 
+# ---------------------------------------------------------------------------
+# Cameras, shared between live previews and the teleoperation rig
+# ---------------------------------------------------------------------------
+
+
+def _make_camera(binding: dict[str, Any]):
+    """A LeRobot camera for one of the app's camera bindings."""
+    kind = str(binding.get("type") or "opencv")
+    identifier = str(binding.get("identifier") or "0")
+    width = int(binding.get("width") or 640)
+    height = int(binding.get("height") or 480)
+    fps = int(binding.get("fps") or 30)
+    if kind == "intelrealsense":
+        from lerobot.cameras.realsense import RealSenseCamera, RealSenseCameraConfig
+
+        return RealSenseCamera(
+            RealSenseCameraConfig(serial_number_or_name=identifier, width=width, height=height, fps=fps)
+        )
+    from lerobot.cameras.opencv import OpenCVCamera, OpenCVCameraConfig
+
+    index: Any = identifier
+    try:
+        index = int(identifier)
+    except (TypeError, ValueError):
+        pass
+    return OpenCVCamera(OpenCVCameraConfig(index_or_path=index, width=width, height=height, fps=fps))
+
+
+def _camera_id(binding: dict[str, Any]) -> str:
+    return f"{binding.get('type') or 'opencv'}:{binding.get('identifier')}"
+
+
+class CameraHub:
+    """
+    Every camera the app has open, counted by who is using it.
+
+    A preview and the rig ask for the same camera independently — the feed is
+    shown before driving starts, and keeps showing while it records — and a
+    camera can only be opened once, so both get the one connection.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._cams: dict[str, dict[str, Any]] = {}
+
+    def acquire(self, binding: dict[str, Any]) -> str:
+        key = _camera_id(binding)
+        with self._lock:
+            entry = self._cams.get(key)
+            if entry is not None:
+                entry["refs"] += 1
+                return key
+        # Outside the lock: connecting waits for the camera to warm up.
+        cam = _make_camera(binding)
+        cam.connect()
+        with self._lock:
+            entry = self._cams.get(key)
+            if entry is not None:
+                entry["refs"] += 1
+                spare = cam
+            else:
+                self._cams[key] = {"cam": cam, "refs": 1}
+                spare = None
+        if spare is not None:
+            with contextlib.suppress(Exception):
+                spare.disconnect()
+        return key
+
+    def release(self, key: str) -> None:
+        with self._lock:
+            entry = self._cams.get(key)
+            if entry is None:
+                return
+            entry["refs"] -= 1
+            if entry["refs"] > 0:
+                return
+            self._cams.pop(key)
+        with contextlib.suppress(Exception):
+            entry["cam"].disconnect()
+
+    def latest(self, key: str):
+        entry = self._cams.get(key)
+        if entry is None:
+            return None
+        try:
+            return entry["cam"].read_latest(max_age_ms=1000)
+        except Exception:  # noqa: BLE001 - a stale or dropped frame skips a beat
+            return None
+
+    def shape(self, key: str) -> tuple[int, int, int]:
+        cam = self._cams[key]["cam"]
+        return (int(cam.height), int(cam.width), 3)
+
+
+CAMERAS = CameraHub()
+
+
+def _jpeg(frame, max_width: int = 480, quality: int = 70) -> tuple[str, int, int]:
+    import cv2
+    import numpy as np
+
+    arr = np.asarray(frame)
+    if arr.ndim == 3 and arr.shape[2] == 3:
+        arr = cv2.cvtColor(arr, cv2.COLOR_RGB2BGR)
+    if arr.shape[1] > max_width:
+        scale = max_width / arr.shape[1]
+        arr = cv2.resize(arr, (max_width, int(arr.shape[0] * scale)), interpolation=cv2.INTER_AREA)
+    ok, buf = cv2.imencode(".jpg", arr, [int(cv2.IMWRITE_JPEG_QUALITY), quality])
+    if not ok:
+        raise RuntimeError("Failed to JPEG-encode a camera frame.")
+    return base64.b64encode(buf.tobytes()).decode("ascii"), int(arr.shape[1]), int(arr.shape[0])
+
+
+class CameraPreviews:
+    """
+    Live feeds for the panel: a downscaled JPEG a few times a second per camera.
+
+    Small and slow on purpose — it is for aiming and watching the camera, and it
+    must never take time from the control loop or the frames being recorded.
+    """
+
+    PREVIEW_HZ = 8.0
+
+    def __init__(self) -> None:
+        self._active: dict[str, tuple[str, threading.Event]] = {}
+        self._lock = threading.Lock()
+
+    def set(self, preview_id: str, binding: dict[str, Any] | None) -> dict[str, Any]:
+        self._stop(preview_id)
+        if binding is None:
+            return {"previewing": False}
+        key = CAMERAS.acquire(binding)
+        stop = threading.Event()
+        with self._lock:
+            self._active[preview_id] = (key, stop)
+
+        def loop() -> None:
+            failures = 0
+            while not stop.wait(1.0 / self.PREVIEW_HZ):
+                frame = CAMERAS.latest(key)
+                if frame is None:
+                    failures += 1
+                    if failures in (10, 100):
+                        notify("cameraError", preview=preview_id, message="The camera stopped sending frames.")
+                    continue
+                failures = 0
+                try:
+                    data, width, height = _jpeg(frame)
+                except Exception as exc:  # noqa: BLE001
+                    notify("cameraError", preview=preview_id, message=f"{type(exc).__name__}: {exc}")
+                    continue
+                # `preview`, not `id`: a frame with an `id` is a reply to a request, and
+                # the app would drop it as one it never sent.
+                notify("cameraFrame", preview=preview_id, jpeg=data, width=width, height=height)
+
+        threading.Thread(target=loop, name=f"preview-{preview_id}", daemon=True).start()
+        return {"previewing": True}
+
+    def stop_all(self) -> None:
+        for preview_id in list(self._active):
+            self._stop(preview_id)
+
+    def _stop(self, preview_id: str) -> None:
+        with self._lock:
+            entry = self._active.pop(preview_id, None)
+        if entry is None:
+            return
+        key, stop = entry
+        stop.set()
+        CAMERAS.release(key)
+
+
+PREVIEWS = CameraPreviews()
+
+
+# ---------------------------------------------------------------------------
+# Teleoperation rig: the loop the app runs instead of lerobot-teleoperate
+# ---------------------------------------------------------------------------
+
+
+def _normalized(bus, raw: dict[str, int]) -> dict[str, float]:
+    """Raw ticks to LeRobot's units, through the bus's own calibration."""
+    ids = {bus.motors[name].id: value for name, value in raw.items()}
+    return {bus._id_to_name(i): float(v) for i, v in bus._normalize(ids).items()}
+
+
+def _calibrated_state(bus, raw: dict[str, int], port: str) -> dict[str, Any]:
+    """The arm in the shape `bus.state` returns, so the app can draw it."""
+    motors = []
+    for name, motor in bus.motors.items():
+        cal = bus.calibration.get(name)
+        motors.append(
+            {
+                "name": name,
+                "id": motor.id,
+                "position": int(raw[name]) if name in raw else None,
+                "rangeMin": cal.range_min if cal else None,
+                "rangeMax": cal.range_max if cal else None,
+                "homingOffset": cal.homing_offset if cal else None,
+                "driveMode": cal.drive_mode if cal else 0,
+                "online": name in raw,
+                "error": None,
+            }
+        )
+    return {"port": port, "baudrate": bus.get_baudrate() if hasattr(bus, "get_baudrate") else None, "motors": motors}
+
+
+def _connect_arm(device, label: str) -> None:
+    """
+    Connect a LeRobot follower or leader without its interactive calibration.
+
+    LeRobot asks on stdin when the motors and the file disagree — and stdin is
+    this sidecar's protocol. Answering for it the way ENTER would: write the
+    file's calibration to the motors. With no file there is nothing to write.
+    """
+    device.connect(calibrate=False)
+    if device.is_calibrated:
+        return
+    if not device.calibration:
+        with contextlib.suppress(Exception):
+            device.disconnect()
+        raise RuntimeError(
+            f"'{label}' has no calibration file in {device.calibration_dir}. Calibrate it in Configure first."
+        )
+    with device.bus.torque_disabled():
+        device.bus.write_calibration(device.calibration)
+
+
+def _release_arm(device) -> None:
+    """
+    Switch an arm's torque off and close its port, whatever state it is in.
+
+    LeRobot's `disconnect` does both, but gives up on the port if switching the
+    torque off fails part-way — one motor that misses a write would leave the
+    port held and the rest of the arm stiff. So on failure each step is retried
+    on its own, and the port is closed regardless.
+    """
+    try:
+        device.disconnect()
+        return
+    except Exception as exc:  # noqa: BLE001
+        log(f"release {device}: disconnect failed ({type(exc).__name__}: {exc}); retrying step by step")
+    bus = getattr(device, "bus", None)
+    if bus is None:
+        return
+    for name in bus.motors:
+        try:
+            bus.write("Torque_Enable", name, 0, num_retry=5)
+        except Exception as exc:  # noqa: BLE001
+            log(f"release {device}: could not switch off {name}: {exc}")
+    with contextlib.suppress(Exception):
+        bus.port_handler.closePort()
+    for cam in getattr(device, "cameras", {}).values():
+        with contextlib.suppress(Exception):
+            cam.disconnect()
+
+
+class RigSide:
+    def __init__(self, spec: dict[str, Any]) -> None:
+        self.name: str = spec["side"]
+        self.prefix: str = spec.get("prefix") or ""
+        self.controller: str = spec["controller"]
+        self.follower = None
+        self.leader = None
+        self.port: str | None = None
+        self.leader_port: str | None = None
+        self.camera_key: str | None = None
+        self.camera_name: str | None = None
+        self.goal_ticks: dict[str, int] | None = None
+        # Normalized, `<motor>.pos` keyed — what goes into the dataset.
+        self.state: dict[str, float] | None = None
+        self.action: dict[str, float] | None = None
+        self.lock = threading.Lock()
+
+    @property
+    def virtual(self) -> bool:
+        return self.follower is None
+
+
+class Recorder:
+    """
+    One dataset, written with LeRobot's own writer while the rig runs.
+
+    Each start/stop is one episode. Stopping saves it on a worker thread —
+    encoding the video takes a while — and the next start waits for that.
+    """
+
+    def __init__(self) -> None:
+        self.dataset = None
+        self.path: str | None = None
+        self.task = ""
+        self.recording = False
+        self.frames = 0
+        self.saver: threading.Thread | None = None
+        self.error: str | None = None
+        self._lock = threading.Lock()
+        self._last_status = 0.0
+
+    @property
+    def phase(self) -> str:
+        if self.recording:
+            return "recording"
+        if self.saver is not None and self.saver.is_alive():
+            return "saving"
+        return "idle"
+
+    def status(self, rig: "Rig | None") -> dict[str, Any]:
+        episodes = 0
+        if self.dataset is not None:
+            with contextlib.suppress(Exception):
+                episodes = int(self.dataset.meta.total_episodes)
+        return {
+            "running": rig is not None and rig.running,
+            "phase": self.phase,
+            "episodes": episodes,
+            "frames": self.frames,
+            "datasetPath": self.path,
+            "error": self.error,
+        }
+
+    def notify_status(self, rig: "Rig | None") -> None:
+        notify("rigStatus", **self.status(rig))
+
+    def start(self, rig: "Rig", repo_id: str, root: str, task: str) -> None:
+        from pathlib import Path
+
+        if self.phase == "saving":
+            raise RuntimeError("Still saving the last episode — start again in a moment.")
+        if self.recording:
+            return
+        if not repo_id.strip():
+            raise RuntimeError("Give the dataset a name.")
+        if not task.strip():
+            raise RuntimeError("Describe the task being recorded.")
+        path = str(Path(root).expanduser() / repo_id)
+        if self.dataset is None or self.path != path:
+            self.close()
+            self.dataset = self._open(rig, repo_id, path)
+            self.path = path
+        self.task = task
+        self.frames = 0
+        self.error = None
+        with self._lock:
+            self.recording = True
+        self.notify_status(rig)
+
+    def _open(self, rig: "Rig", repo_id: str, path: str):
+        from pathlib import Path
+
+        from lerobot.datasets.lerobot_dataset import LeRobotDataset
+
+        features = rig.features()
+        cameras = sum(1 for side in rig.sides if side.camera_key)
+        threads = 4 * cameras
+        if (Path(path) / "meta" / "info.json").exists():
+            dataset = LeRobotDataset.resume(repo_id, root=path, image_writer_threads=threads)
+            if dataset.fps != rig.fps:
+                raise RuntimeError(
+                    f"'{repo_id}' was recorded at {dataset.fps} fps; this session runs at {rig.fps}. "
+                    "Match the loop rate, or record to a new dataset."
+                )
+            ours = {k for k in features}
+            theirs = {k for k in dataset.features if k.startswith(("observation", "action"))}
+            if ours != theirs:
+                with contextlib.suppress(Exception):
+                    dataset.finalize()
+                missing = sorted(theirs - ours)
+                extra = sorted(ours - theirs)
+                raise RuntimeError(
+                    f"'{repo_id}' was recorded with a different setup "
+                    f"(it has {', '.join(missing) or 'nothing more'}; this one adds {', '.join(extra) or 'nothing'}). "
+                    "Record to a new dataset name."
+                )
+            return dataset
+        return LeRobotDataset.create(
+            repo_id,
+            fps=rig.fps,
+            features=features,
+            root=path,
+            robot_type=rig.robot_type,
+            use_videos=True,
+            image_writer_threads=threads,
+        )
+
+    def add(self, rig: "Rig") -> None:
+        from lerobot.utils.feature_utils import build_dataset_frame
+
+        with self._lock:
+            if not self.recording or self.dataset is None:
+                return
+            observation: dict[str, Any] = {}
+            action: dict[str, Any] = {}
+            for side in rig.sides:
+                with side.lock:
+                    state, act = side.state, side.action
+                if state is None or act is None:
+                    return
+                for key, value in state.items():
+                    observation[f"{side.prefix}{key}"] = value
+                    # A joint no controller has commanded yet is asked to stay put.
+                    action[f"{side.prefix}{key}"] = act.get(key, value)
+                if side.camera_key:
+                    image = CAMERAS.latest(side.camera_key)
+                    if image is None:
+                        return
+                    observation[f"{side.prefix}{side.camera_name}"] = image
+            features = self.dataset.features
+            frame = {
+                **build_dataset_frame(features, observation, prefix="observation"),
+                **build_dataset_frame(features, action, prefix="action"),
+                "task": self.task,
+            }
+            self.dataset.add_frame(frame)
+            self.frames += 1
+        now = time.monotonic()
+        if now - self._last_status > 0.5:
+            self._last_status = now
+            self.notify_status(rig)
+
+    def stop(self, rig: "Rig | None", discard: bool = False) -> None:
+        with self._lock:
+            if not self.recording:
+                return
+            self.recording = False
+            dataset = self.dataset
+            frames = self.frames
+        if dataset is None:
+            return
+        if discard or frames == 0:
+            with contextlib.suppress(Exception):
+                dataset.clear_episode_buffer()
+            self.notify_status(rig)
+            return
+
+        def save() -> None:
+            try:
+                dataset.save_episode()
+            except Exception as exc:  # noqa: BLE001
+                self.error = f"Could not save the episode: {type(exc).__name__}: {exc}"
+                with contextlib.suppress(Exception):
+                    dataset.clear_episode_buffer()
+            finally:
+                # Report after the thread is done, so the phase reads idle.
+                threading.Timer(0.05, lambda: self.notify_status(rig)).start()
+
+        self.saver = threading.Thread(target=save, name="save-episode", daemon=True)
+        self.saver.start()
+        self.notify_status(rig)
+
+    def close(self) -> None:
+        """Save what is being recorded and finish the dataset, so it is valid on disk."""
+        self.stop(None)
+        if self.saver is not None:
+            self.saver.join()
+            self.saver = None
+        if self.dataset is not None:
+            with contextlib.suppress(Exception):
+                self.dataset.finalize()
+        self.dataset = None
+        self.path = None
+
+
+RECORDER = Recorder()
+
+
+class Rig:
+    """
+    The teleoperation loop for one or two arms.
+
+    Real arms are LeRobot's own `SOFollower` / `SOLeader`, connected from the
+    profile's port and calibration exactly as `lerobot-teleoperate` would, so a
+    leader drives its follower in LeRobot's units through LeRobot's code. The
+    keyboard and gamepad hand in goal ticks (`rig.goals`), and a virtual follower,
+    which lives in the app, hands in its state and action (`rig.feed`). Every
+    tick reports positions to the app and, while recording, adds a frame.
+    """
+
+    def __init__(self) -> None:
+        self.sides: list[RigSide] = []
+        self.fps = 30
+        self.robot_type = "so101_follower"
+        self.running = False
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def start(self, fps: int, robot_type: str, sides: list[dict[str, Any]]) -> dict[str, Any]:
+        from pathlib import Path
+
+        from lerobot.robots.so_follower import SOFollower, SOFollowerRobotConfig
+        from lerobot.teleoperators.so_leader import SOLeader, SOLeaderTeleopConfig
+
+        self.stop()
+        # The single-arm session must let go of any port the rig is about to open.
+        SESSION.close()
+        self.fps = max(1, min(int(fps), 120))
+        self.robot_type = robot_type
+        built: list[RigSide] = []
+        report: dict[str, Any] = {}
+        try:
+            for spec in sides:
+                side = RigSide(spec)
+                built.append(side)
+                info: dict[str, Any] = {"follower": None, "leader": None}
+                follower = spec.get("follower")
+                if follower:
+                    side.port = follower["port"]
+                    side.follower = SOFollower(
+                        SOFollowerRobotConfig(
+                            port=follower["port"],
+                            id=follower["id"],
+                            calibration_dir=Path(follower["calibrationDir"]),
+                            # Release the arm when driving stops, as lerobot-teleoperate
+                            # does: motors left holding a pose stay stiff and warm, and
+                            # cannot be moved by hand until something switches them off.
+                            disable_torque_on_disconnect=True,
+                        )
+                    )
+                    _connect_arm(side.follower, follower["id"])
+                    raw = side.follower.bus.sync_read("Present_Position", normalize=False)
+                    info["follower"] = _calibrated_state(side.follower.bus, raw, side.port)
+                leader = spec.get("leader")
+                if leader:
+                    side.leader_port = leader["port"]
+                    side.leader = SOLeader(
+                        SOLeaderTeleopConfig(
+                            port=leader["port"],
+                            id=leader["id"],
+                            calibration_dir=Path(leader["calibrationDir"]),
+                        )
+                    )
+                    _connect_arm(side.leader, leader["id"])
+                    raw = side.leader.bus.sync_read("Present_Position", normalize=False)
+                    info["leader"] = _calibrated_state(side.leader.bus, raw, side.leader_port)
+                camera = spec.get("camera")
+                if camera:
+                    side.camera_key = CAMERAS.acquire(camera["binding"])
+                    side.camera_name = camera["name"]
+                report[side.name] = info
+        except Exception:
+            self.sides = built
+            self._disconnect()
+            raise
+        self.sides = built
+        self.running = True
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._loop, name="rig", daemon=True)
+        self._thread.start()
+        RECORDER.notify_status(self)
+        return {"sides": report, "fps": self.fps}
+
+    def side(self, name: str) -> RigSide:
+        for side in self.sides:
+            if side.name == name:
+                return side
+        raise RuntimeError(f"No '{name}' side in the running rig.")
+
+    def goals(self, name: str, ticks: dict[str, int]) -> None:
+        side = self.side(name)
+        with side.lock:
+            side.goal_ticks = {k: int(v) for k, v in ticks.items()}
+
+    def feed(self, name: str, state: dict[str, float] | None, action: dict[str, float] | None) -> None:
+        side = self.side(name)
+        with side.lock:
+            if state is not None:
+                side.state = {k: float(v) for k, v in state.items()}
+                if side.action is None:
+                    side.action = dict(side.state)
+            if action is not None:
+                # Goals arrive for the joints that moved; the rest keep theirs.
+                side.action = {**(side.action or {}), **{k: float(v) for k, v in action.items()}}
+
+    def features(self) -> dict[str, dict]:
+        from lerobot.utils.feature_utils import hw_to_dataset_features
+
+        motors = [name for name, _ in SO_MOTORS]
+        joints: dict[str, Any] = {}
+        cameras: dict[str, Any] = {}
+        for side in self.sides:
+            for motor in motors:
+                joints[f"{side.prefix}{motor}.pos"] = float
+            if side.camera_key:
+                cameras[f"{side.prefix}{side.camera_name}"] = CAMERAS.shape(side.camera_key)
+        return {
+            **hw_to_dataset_features(joints, "action", use_video=True),
+            **hw_to_dataset_features({**joints, **cameras}, "observation", use_video=True),
+        }
+
+    def stop(self) -> None:
+        if self._thread is not None:
+            self._stop.set()
+            self._thread.join(timeout=3)
+            self._thread = None
+        # Release the arms first: saving the episode encodes video, which can take
+        # a while, and the arms must not stay stiff for it. Its frames are already
+        # in the recorder's buffer.
+        self._disconnect()
+        RECORDER.close()
+        if self.running:
+            self.running = False
+            RECORDER.notify_status(self)
+
+    def _disconnect(self) -> None:
+        for side in self.sides:
+            for device in (side.follower, side.leader):
+                if device is not None:
+                    _release_arm(device)
+            if side.camera_key:
+                CAMERAS.release(side.camera_key)
+        self.sides = []
+
+    def _step(self, side: RigSide) -> dict[str, Any]:
+        out: dict[str, Any] = {"side": side.name}
+        if side.leader is not None:
+            raw = side.leader.bus.sync_read("Present_Position", normalize=False)
+            out["leader"] = {k: int(v) for k, v in raw.items()}
+            action = {f"{k}.pos": v for k, v in _normalized(side.leader.bus, raw).items()}
+            if side.follower is not None:
+                action = side.follower.send_action(action)
+            else:
+                # The app moves the virtual follower; it needs the action to.
+                out["action"] = action
+            with side.lock:
+                side.action = {k: float(v) for k, v in action.items()}
+        elif side.follower is not None:
+            with side.lock:
+                goals, side.goal_ticks = side.goal_ticks, None
+            if goals:
+                side.follower.bus.sync_write("Goal_Position", goals, normalize=False)
+                action = {f"{k}.pos": v for k, v in _normalized(side.follower.bus, goals).items()}
+                with side.lock:
+                    side.action = {**(side.action or {}), **action}
+        if side.follower is not None:
+            raw = side.follower.bus.sync_read("Present_Position", normalize=False)
+            out["follower"] = {k: int(v) for k, v in raw.items()}
+            state = {f"{k}.pos": v for k, v in _normalized(side.follower.bus, raw).items()}
+            with side.lock:
+                side.state = state
+                # Until a controller says otherwise, the action is to stay put.
+                if side.action is None or len(side.action) < len(state):
+                    side.action = {**state, **(side.action or {})}
+        return out
+
+    def _loop(self) -> None:
+        period = 1.0 / self.fps
+        failures: dict[str, int] = {}
+        while not self._stop.is_set():
+            t0 = time.perf_counter()
+            frames = []
+            for side in self.sides:
+                try:
+                    frames.append(self._step(side))
+                    failures[side.name] = 0
+                except Exception as exc:  # noqa: BLE001 - one bad read must not stop the loop
+                    count = failures.get(side.name, 0) + 1
+                    failures[side.name] = count
+                    if count in (1, 10) or count % 100 == 0:
+                        notify("rigError", side=side.name, message=f"{type(exc).__name__}: {exc}")
+            notify("rigFrame", frames=frames)
+            try:
+                RECORDER.add(self)
+            except Exception as exc:  # noqa: BLE001
+                RECORDER.error = f"Could not record a frame: {type(exc).__name__}: {exc}"
+                RECORDER.stop(self, discard=True)
+            self._stop.wait(max(0.0, period - (time.perf_counter() - t0)))
+
+
+RIG = Rig()
+
+
+def m_rig_start(fps: int = 30, robotType: str = "so101_follower", sides: list | None = None, **_: Any) -> dict[str, Any]:
+    return RIG.start(fps, robotType, sides or [])
+
+
+def m_rig_stop(**_: Any) -> dict[str, Any]:
+    RIG.stop()
+    return {"stopped": True}
+
+
+def m_rig_goals(side: str, positions: dict[str, int], **_: Any) -> dict[str, Any]:
+    RIG.goals(side, positions)
+    return {"ok": True}
+
+
+def m_rig_feed(side: str, state: dict | None = None, action: dict | None = None, **_: Any) -> dict[str, Any]:
+    RIG.feed(side, state, action)
+    return {"ok": True}
+
+
+def m_record_start(repoId: str, root: str, task: str, **_: Any) -> dict[str, Any]:
+    if not RIG.running:
+        raise RuntimeError("Start driving before recording — the recording follows the arms.")
+    RECORDER.start(RIG, repoId, root, task)
+    return RECORDER.status(RIG)
+
+
+def m_record_stop(discard: bool = False, **_: Any) -> dict[str, Any]:
+    RECORDER.stop(RIG, discard=discard)
+    return RECORDER.status(RIG)
+
+
+def m_record_status(**_: Any) -> dict[str, Any]:
+    return RECORDER.status(RIG)
+
+
+def m_camera_preview(id: str, binding: dict | None = None, **_: Any) -> dict[str, Any]:  # noqa: A002
+    return PREVIEWS.set(id, binding)
+
+
 METHODS: dict[str, Callable[..., Any]] = {
     "ping": m_ping,
     "env.info": m_env_info,
@@ -1562,6 +2276,14 @@ METHODS: dict[str, Callable[..., Any]] = {
     "bus.state": m_bus_state,
     "bus.positions": m_bus_positions,
     "bus.telemetry": m_bus_telemetry,
+    "rig.start": m_rig_start,
+    "rig.stop": m_rig_stop,
+    "rig.goals": m_rig_goals,
+    "rig.feed": m_rig_feed,
+    "record.start": m_record_start,
+    "record.stop": m_record_stop,
+    "record.status": m_record_status,
+    "camera.preview": m_camera_preview,
     "bus.streamStart": m_bus_stream_start,
     "bus.streamStop": m_bus_stream_stop,
     "bus.recordRom": m_bus_record_rom,
@@ -1617,6 +2339,7 @@ def handle(frame: dict[str, Any]) -> None:
 
 
 def main() -> int:
+    sys.stdout = sys.stderr
     log(f"started on {sys.executable}")
     notify("ready", python=".".join(str(v) for v in sys.version_info[:3]))
     try:
@@ -1635,6 +2358,12 @@ def main() -> int:
     except KeyboardInterrupt:
         pass
     finally:
+        # The app is gone — quit, crashed or reloaded. Nothing will ever ask for
+        # these arms to be released, so release them now.
+        with contextlib.suppress(Exception):
+            RIG.stop()
+        with contextlib.suppress(Exception):
+            PREVIEWS.stop_all()
         SESSION.close()
         log("stopped")
     return 0
