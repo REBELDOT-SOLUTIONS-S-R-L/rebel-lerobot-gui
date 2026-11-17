@@ -45,7 +45,7 @@ const ABOUT_TAB = {
 function tabClass(active: boolean, locked = false): string {
   return `relative rounded-t-md px-3.5 py-2 text-sm transition-colors ${
     active
-      ? 'bg-shell-900 font-semibold text-ink-100'
+      ? 'bg-shell-900 font-semibold text-ink-100 shadow-[inset_0_3px_0_var(--color-accent-500)]'
       : locked
         ? 'cursor-not-allowed text-ink-500 opacity-40'
         : 'text-ink-500 hover:bg-shell-850 hover:text-ink-300'
@@ -138,7 +138,7 @@ export function App(): ReactNode {
           <span className="h-6 w-px shrink-0 bg-shell-700" aria-hidden />
           <ArmMark />
           <div className="leading-tight">
-            <h1 className="text-sm font-semibold text-ink-100">LeRobot Control</h1>
+            <h1 className="text-[15px] font-medium text-ink-100">LeRobot Control</h1>
             <p className="text-[11px] text-ink-600">SO-100 / SO-101 arms</p>
           </div>
         </div>
@@ -364,10 +364,10 @@ function ArmMark(): ReactNode {
     <svg viewBox="0 0 24 24" className="h-7 w-7" aria-hidden>
       <rect x="6" y="20" width="12" height="2.5" rx="1" className="fill-shell-500" />
       <rect x="9.5" y="12" width="5" height="8.5" rx="1.4" className="fill-shell-600" />
-      <path d="M12 13 L17 7" className="stroke-accent-400" strokeWidth="3.2" strokeLinecap="round" />
-      <path d="M17 7 L13 3" className="stroke-live-400" strokeWidth="3.2" strokeLinecap="round" />
-      <circle cx="12" cy="13" r="2" className="fill-shell-950 stroke-accent-400" strokeWidth="1.4" />
-      <circle cx="17" cy="7" r="1.8" className="fill-shell-950 stroke-live-400" strokeWidth="1.4" />
+      <path d="M12 13 L17 7" className="stroke-accent-500" strokeWidth="3.2" strokeLinecap="round" />
+      <path d="M17 7 L13 3" className="stroke-ink-300" strokeWidth="3.2" strokeLinecap="round" />
+      <circle cx="12" cy="13" r="2" className="fill-shell-950 stroke-accent-500" strokeWidth="1.4" />
+      <circle cx="17" cy="7" r="1.8" className="fill-shell-950 stroke-ink-300" strokeWidth="1.4" />
     </svg>
   )
 }

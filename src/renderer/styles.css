@@ -2,7 +2,66 @@
 @import '@xterm/xterm/css/xterm.css';
 
 /*
- * Instrument-panel palette, in two themes.
+ * Basier Circle — RebelDot's brand heading face. It is a commercial font, so it
+ * is NOT in the repository: drop the four webfonts into
+ * src/renderer/public/fonts/brand/ (gitignored; see the README there) and they
+ * ship with the build. An installed copy is used first; with neither, headings
+ * fall back to Inter and nothing else changes.
+ */
+@font-face {
+  font-family: 'Basier Circle';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src:
+    local('Basier Circle Regular'),
+    url('/fonts/brand/basiercircle-regular-webfont.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Basier Circle';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src:
+    local('Basier Circle Medium'),
+    url('/fonts/brand/basiercircle-medium-webfont.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Basier Circle';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src:
+    local('Basier Circle SemiBold'),
+    url('/fonts/brand/basiercircle-semibold-webfont.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Basier Circle';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src:
+    local('Basier Circle Bold'),
+    url('/fonts/brand/basiercircle-bold-webfont.woff2') format('woff2');
+}
+
+/* Inter (variable), SIL Open Font License — the brand's text face. */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('./assets/fonts/Inter-Variable.woff2') format('woff2');
+}
+
+/*
+ * RebelDot palette, in two themes.
+ *
+ * Taken from the RebelDot deck design system: brand yellow #FFD000, ink
+ * #121212, white, #e6e6e6 and neutral greys. Yellow is a fill and an edge; on a
+ * light ground it is never text (it does not read on white), so there
+ * `accent-400` — the text role — is ink, and `on-accent` is what sits on a
+ * yellow fill in both themes. Green, orange and red are kept for status only.
  *
  * The dark palette is the @theme default; the light one re-declares the very
  * same `--color-*` names under `[data-theme='light']`. Declaring the literals in
@@ -17,27 +76,30 @@
  * equivalent role rather than inverting the scale.
  */
 @theme {
-  --color-shell-950: #070a10;
-  --color-shell-900: #0b0f16;
-  --color-shell-850: #10151f;
-  --color-shell-800: #151b26;
-  --color-shell-700: #1e2634;
-  --color-shell-600: #2b3546;
-  --color-shell-500: #3d4859;
+  --color-shell-950: #0e0e0e;
+  --color-shell-900: #121212;
+  --color-shell-850: #1b1b1b;
+  --color-shell-800: #222222;
+  --color-shell-700: #2c2c2c;
+  --color-shell-600: #3d3d3d;
+  --color-shell-500: #595959;
 
-  --color-ink-100: #eef2f8;
-  --color-ink-300: #b9c3d3;
-  --color-ink-500: #7d8798;
-  --color-ink-600: #5d6675;
+  --color-ink-100: #ffffff;
+  --color-ink-300: #cfcfcf;
+  --color-ink-500: #a3a3a3;
+  --color-ink-600: #8f8f8f;
 
-  --color-accent-400: #4cc4ff;
-  --color-accent-500: #1fa8e8;
-  --color-accent-600: #1385bd;
+  --color-accent-300: #ffe04d;
+  --color-accent-400: #ffd000;
+  --color-accent-500: #ffd000;
+  --color-accent-600: #ffd000;
+  --color-on-accent: #121212;
+  --color-focus: #ffd000;
 
   --color-live-400: #46e0a8;
   --color-live-600: #12a172;
-  --color-warn-400: #ffc773;
-  --color-warn-600: #c2801d;
+  --color-warn-400: #ff9f43;
+  --color-warn-600: #d9730d;
   --color-danger-400: #ff8090;
   --color-danger-600: #cf3b52;
 
@@ -46,8 +108,11 @@
    * token of its own because both want a shade that reads as a viewport rather
    * than a panel, but it follows the theme like everything else.
    */
-  --color-plate: #070a10;
+  --color-plate: #0e0e0e;
 
+  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  /* Basier Circle is the brand heading face; Inter stands in if it fails to load. */
+  --font-display: 'Basier Circle', 'Inter', ui-sans-serif, system-ui, sans-serif;
   --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
 }
 
@@ -60,59 +125,65 @@
   color-scheme: light;
 
   --color-shell-950: #ffffff;
-  --color-shell-900: #eef1f6;
+  --color-shell-900: #f2f2f2;
   --color-shell-850: #ffffff;
-  --color-shell-800: #f3f5f9;
-  --color-shell-700: #dbe1ea;
-  --color-shell-600: #c2cad8;
-  --color-shell-500: #9aa5b6;
+  --color-shell-800: #f5f5f5;
+  --color-shell-700: #e6e6e6;
+  --color-shell-600: #cfcfcf;
+  --color-shell-500: #a3a3a3;
 
-  --color-ink-100: #0e141d;
-  --color-ink-300: #38424f;
-  --color-ink-500: #646e7d;
-  --color-ink-600: #8a94a3;
+  --color-ink-100: #121212;
+  --color-ink-300: #414141;
+  --color-ink-500: #595959;
+  --color-ink-600: #6b6b6b;
 
-  --color-accent-400: #0a72a8;
-  --color-accent-500: #1590d0;
-  --color-accent-600: #0f7cb4;
+  --color-accent-300: #ffe04d;
+  --color-accent-400: #121212;
+  --color-accent-500: #ffd000;
+  --color-accent-600: #ffd000;
+  --color-on-accent: #121212;
+  --color-focus: #121212;
 
   --color-live-400: #0a8f60;
   --color-live-600: #12a172;
-  --color-warn-400: #96620a;
-  --color-warn-600: #c2801d;
+  --color-warn-400: #a34a00;
+  --color-warn-600: #d9730d;
   --color-danger-400: #c0293e;
   --color-danger-600: #cf3b52;
 
-  --color-plate: #f2f5f9;
+  --color-plate: #ececec;
 }
 
 /* A dark subtree inside a light one has to restate the defaults. */
 [data-theme='dark'] {
-  --color-shell-950: #070a10;
-  --color-shell-900: #0b0f16;
-  --color-shell-850: #10151f;
-  --color-shell-800: #151b26;
-  --color-shell-700: #1e2634;
-  --color-shell-600: #2b3546;
-  --color-shell-500: #3d4859;
+  --color-shell-950: #0e0e0e;
+  --color-shell-900: #121212;
+  --color-shell-850: #1b1b1b;
+  --color-shell-800: #222222;
+  --color-shell-700: #2c2c2c;
+  --color-shell-600: #3d3d3d;
+  --color-shell-500: #595959;
 
-  --color-ink-100: #eef2f8;
-  --color-ink-300: #b9c3d3;
-  --color-ink-500: #7d8798;
-  --color-ink-600: #5d6675;
+  --color-ink-100: #ffffff;
+  --color-ink-300: #cfcfcf;
+  --color-ink-500: #a3a3a3;
+  --color-ink-600: #8f8f8f;
 
-  --color-accent-400: #4cc4ff;
-  --color-accent-500: #1fa8e8;
-  --color-accent-600: #1385bd;
+  --color-accent-300: #ffe04d;
+  --color-accent-400: #ffd000;
+  --color-accent-500: #ffd000;
+  --color-accent-600: #ffd000;
+  --color-on-accent: #121212;
+  --color-focus: #ffd000;
 
   --color-live-400: #46e0a8;
   --color-live-600: #12a172;
-  --color-warn-400: #ffc773;
-  --color-warn-600: #c2801d;
+  --color-warn-400: #ff9f43;
+  --color-warn-600: #d9730d;
   --color-danger-400: #ff8090;
   --color-danger-600: #cf3b52;
 
-  --color-plate: #070a10;
+  --color-plate: #0e0e0e;
 }
 
 html,
@@ -125,8 +196,8 @@ body {
   margin: 0;
   background: var(--color-shell-900);
   color: var(--color-ink-100);
-  font-family:
-    ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  font-family: var(--font-sans);
+  font-feature-settings: 'cv11', 'ss01';
   font-size: 14px;
   -webkit-font-smoothing: antialiased;
   overflow: hidden;
@@ -160,7 +231,7 @@ input[type='number']::-webkit-outer-spin-button {
 }
 
 :focus-visible {
-  outline: 2px solid var(--color-accent-500);
+  outline: 2px solid var(--color-focus);
   outline-offset: 1px;
 }
 
@@ -192,9 +263,35 @@ input[type='number']::-webkit-outer-spin-button {
  * needs an edge to sit on, where the dark plate gave it one for free.
  */
 [data-theme='light'] .arm-render {
-  filter: drop-shadow(0 1px 2px rgb(14 20 29 / 0.35));
+  filter: drop-shadow(0 1px 2px rgb(18 18 18 / 0.35));
 }
 
 .xterm .xterm-viewport {
   background-color: transparent !important;
+}
+
+/*
+ * Headings: the deck sets them in the display face at medium weight, tightly
+ * tracked.
+ */
+h1,
+h2,
+.font-display {
+  font-family: var(--font-display);
+  letter-spacing: -0.0176em;
+}
+
+/* The deck's highlighter stroke: a yellow band under the lower half of a word. */
+.mark {
+  background: linear-gradient(#ffd000, #ffd000) 0 92% / 100% 42% no-repeat;
+}
+[data-theme='dark'] .mark,
+:root:not([data-theme='light']) .mark {
+  background: none;
+  color: #ffd000;
+}
+
+::selection {
+  background: #ffd000;
+  color: #121212;
 }

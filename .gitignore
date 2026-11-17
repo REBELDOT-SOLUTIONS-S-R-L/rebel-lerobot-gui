@@ -27,6 +27,11 @@ samples/*
 assets/simulation/generated/*.blend
 *.blend1
 
+# Licensed brand fonts (Basier Circle). Kept out of this public repository:
+# each developer copies them in locally — see the README in that folder.
+src/renderer/public/fonts/brand/*
+!src/renderer/public/fonts/brand/README.md
+
 # Editors and OS
 .DS_Store
 .idea/

@@ -18,7 +18,7 @@ function createWindow(): BrowserWindow {
     minWidth: 1100,
     minHeight: 720,
     show: false,
-    backgroundColor: '#0b0f16',
+    backgroundColor: '#121212',
     titleBarStyle: isMac ? 'hiddenInset' : 'default',
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),

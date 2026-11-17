@@ -22,34 +22,34 @@ import { Badge, Button } from './ui'
  */
 const TERMINAL_THEMES: Record<ResolvedTheme, Record<string, string>> = {
   dark: {
-    background: '#070a10',
-    foreground: '#b9c3d3',
-    cursor: '#4cc4ff',
-    selectionBackground: 'rgba(76,196,255,0.25)',
-    black: '#151b26',
-    brightBlack: '#3d4859',
+    background: '#0e0e0e',
+    foreground: '#cfcfcf',
+    cursor: '#ffd000',
+    selectionBackground: 'rgba(255,208,0,0.28)',
+    black: '#222222',
+    brightBlack: '#595959',
     red: '#ff8090',
     green: '#46e0a8',
-    yellow: '#ffc773',
-    blue: '#4cc4ff',
+    yellow: '#ffd000',
+    blue: '#7fb4ff',
     magenta: '#c9a2ff',
     cyan: '#61dafb',
-    white: '#eef2f8'
+    white: '#ffffff'
   },
   light: {
-    background: '#f2f5f9',
-    foreground: '#38424f',
-    cursor: '#0a72a8',
-    selectionBackground: 'rgba(21,144,208,0.22)',
-    black: '#0e141d',
-    brightBlack: '#8a94a3',
+    background: '#ececec',
+    foreground: '#414141',
+    cursor: '#121212',
+    selectionBackground: 'rgba(255,208,0,0.45)',
+    black: '#121212',
+    brightBlack: '#6b6b6b',
     red: '#c0293e',
     green: '#0a8f60',
-    yellow: '#96620a',
-    blue: '#0a72a8',
+    yellow: '#8a6a00',
+    blue: '#1f5fb8',
     magenta: '#7b3fc4',
     cyan: '#0b7f96',
-    white: '#38424f'
+    white: '#414141'
   }
 }
 

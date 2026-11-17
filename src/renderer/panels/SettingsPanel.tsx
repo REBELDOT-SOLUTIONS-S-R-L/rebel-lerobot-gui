@@ -110,9 +110,9 @@ export function SettingsPanel(): ReactNode {
                     type="button"
                     title={t.hint}
                     onClick={() => void saveSettings({ theme: t.id })}
-                    className={`rounded-md px-3 py-1.5 text-xs transition-colors ${
+                    className={`rounded-full px-3 py-1.5 text-xs transition-colors ${
                       active
-                        ? 'bg-accent-600 font-semibold text-white'
+                        ? 'bg-accent-500 font-semibold text-on-accent'
                         : 'text-ink-500 hover:bg-shell-800 hover:text-ink-100'
                     }`}
                   >

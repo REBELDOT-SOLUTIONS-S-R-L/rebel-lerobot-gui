@@ -234,7 +234,7 @@ export class ArmScene {
    */
   private applyTheme(): void {
     const token = getComputedStyle(this.canvas).getPropertyValue('--color-plate').trim()
-    const fallback = this.theme === 'light' ? '#f2f5f9' : '#070a10'
+    const fallback = this.theme === 'light' ? '#ececec' : '#0e0e0e'
     this.renderer.setClearColor(new THREE.Color(token || fallback))
 
     const ground = this.ground

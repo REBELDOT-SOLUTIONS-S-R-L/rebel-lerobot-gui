@@ -83,8 +83,8 @@
     }
   ],
   "ground": {
-    "light": "#c9ced6",
-    "dark": "#2c333e",
+    "light": "#cfcfcf",
+    "dark": "#2c2c2c",
     "size": 1.1
   },
   "lighting": {
