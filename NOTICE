@@ -16,3 +16,11 @@ from elsewhere keeps its own terms:
 - assets/logo/ — the RebelDot wordmarks are trademarks of RebelDot. The MIT
   licence covers the code, not the brand: replace them with your own before
   publishing a modified build.
+
+- src/renderer/assets/fonts/Inter-Variable.woff2 — Inter, by Rasmus Andersson
+  (https://rsms.me/inter/), SIL Open Font License 1.1.
+
+- Basier Circle, by atipo foundry, is RebelDot's licensed heading typeface. It
+  is NOT included in this repository and the MIT licence does not cover it.
+  Builds pick it up from src/renderer/public/fonts/brand/ when a licensed copy
+  is placed there, and fall back to Inter otherwise.

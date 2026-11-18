@@ -43,8 +43,8 @@ export function ArmDiagram({
         <defs>
           {/* A soft floor shadow so the render does not float on the panel. */}
           <radialGradient id="arm-floor" cx="50%" cy="50%" r="50%">
-            <stop offset="0%" stopColor="#4cc4ff" stopOpacity="0.14" />
-            <stop offset="100%" stopColor="#4cc4ff" stopOpacity="0" />
+            <stop offset="0%" stopColor="#ffd000" stopOpacity="0.12" />
+            <stop offset="100%" stopColor="#ffd000" stopOpacity="0" />
           </radialGradient>
         </defs>
 
@@ -149,7 +149,7 @@ function indicatorTone(
   selected: boolean
 ): { dot: string; line: string; halo: string } {
   if (selected) {
-    return { dot: 'fill-accent-400', line: 'stroke-accent-400', halo: 'fill-accent-400/28' }
+    return { dot: 'fill-accent-500', line: 'stroke-accent-500', halo: 'fill-accent-500/28' }
   }
   if (motor?.online) {
     return { dot: 'fill-live-400', line: 'stroke-live-400/65', halo: 'fill-live-400/16' }

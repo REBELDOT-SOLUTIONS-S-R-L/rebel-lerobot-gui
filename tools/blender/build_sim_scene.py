@@ -53,7 +53,7 @@ HEMISPHERE = {"sky": "#eaf2ff", "ground": "#4a4a52", "intensity": 0.6}
 KEY_LIGHT = {"color": "#fff6e8", "intensity": 1.4, "direction": [-0.45, -1.0, -0.55]}
 
 #: The surface. Grey enough to sit under either app theme; the viewer nudges it.
-GROUND = {"size": 1.1, "color": "#8d939c", "light": "#c9ced6", "dark": "#2c333e"}
+GROUND = {"size": 1.1, "color": "#8d939c", "light": "#cfcfcf", "dark": "#2c2c2c"}
 
 #: Per-mesh triangle ceiling. The STLs are print-quality (up to 54k triangles a
 #: part); a GUI viewport does not need that, and the download does not want it.

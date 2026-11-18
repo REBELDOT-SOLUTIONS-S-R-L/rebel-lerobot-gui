@@ -38,7 +38,7 @@ export function Panel({
 
   const heading = (
     <>
-      <h2 className="text-sm font-semibold tracking-wide text-ink-100">{title}</h2>
+      <h2 className="text-[15px] font-medium text-ink-100">{title}</h2>
       {description && <p className="mt-0.5 text-xs leading-relaxed text-ink-500">{description}</p>}
     </>
   )
@@ -126,7 +126,7 @@ export function Divider({ label }: { label?: string }): ReactNode {
   return (
     <div className="my-4 flex items-center gap-3">
       <hr className="flex-1 border-shell-700" />
-      <span className="text-[11px] font-semibold uppercase tracking-widest text-ink-600">{label}</span>
+      <span className="text-[11px] font-medium uppercase tracking-widest text-ink-600">{label}</span>
       <hr className="flex-1 border-shell-700" />
     </div>
   )
@@ -137,9 +137,9 @@ export function Divider({ label }: { label?: string }): ReactNode {
  * ------------------------------------------------------------------ */
 
 const INPUT_CLASS =
-  'w-full rounded-md border border-shell-600 bg-shell-900 px-2.5 py-1.5 text-sm text-ink-100 ' +
-  'placeholder:text-ink-600 transition-colors hover:border-shell-500 focus:border-accent-500 ' +
-  'focus:outline-none disabled:cursor-not-allowed disabled:opacity-50'
+  'w-full rounded-lg border border-shell-600 bg-shell-900 px-2.5 py-1.5 text-sm text-ink-100 ' +
+  'placeholder:text-ink-600 transition-colors hover:border-shell-500 focus:border-focus ' +
+  'focus:ring-2 focus:ring-accent-500/50 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50'
 
 export function TextInput(props: React.InputHTMLAttributes<HTMLInputElement>): ReactNode {
   const { className = '', ...rest } = props
@@ -196,7 +196,7 @@ export function Select<T extends string | number>({
       className={`${INPUT_CLASS} appearance-none bg-[length:12px] pr-7 ${className}`}
       style={{
         backgroundImage:
-          "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath fill='%237d8798' d='M1 1.5 6 6.5l5-5'/%3E%3C/svg%3E\")",
+          "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath fill='%238f8f8f' d='M1 1.5 6 6.5l5-5'/%3E%3C/svg%3E\")",
         backgroundRepeat: 'no-repeat',
         backgroundPosition: 'right 8px center'
       }}
@@ -218,11 +218,11 @@ export function Select<T extends string | number>({
 type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'live'
 
 const BUTTON_VARIANTS: Record<ButtonVariant, string> = {
-  primary: 'bg-accent-500 text-shell-950 hover:bg-accent-400 font-semibold',
-  secondary: 'bg-shell-700 text-ink-100 hover:bg-shell-600 border border-shell-600',
+  primary: 'bg-accent-500 text-on-accent hover:bg-accent-300 font-semibold',
+  secondary: 'bg-shell-800 text-ink-100 hover:bg-shell-700 border border-shell-600',
   ghost: 'bg-transparent text-ink-300 hover:bg-shell-700 hover:text-ink-100',
-  danger: 'bg-danger-600 text-white hover:bg-danger-400 hover:text-shell-950 font-semibold',
-  live: 'bg-live-600 text-shell-950 hover:bg-live-400 font-semibold'
+  danger: 'bg-danger-600 text-white hover:bg-danger-400 hover:text-on-accent font-semibold',
+  live: 'bg-live-600 text-on-accent hover:bg-live-400 font-semibold'
 }
 
 export function Button({
@@ -235,12 +235,12 @@ export function Button({
   variant?: ButtonVariant
   size?: 'sm' | 'md'
 }): ReactNode {
-  const pad = size === 'sm' ? 'px-2.5 py-1 text-xs' : 'px-3 py-1.5 text-sm'
+  const pad = size === 'sm' ? 'px-3 py-1 text-xs' : 'px-4 py-1.5 text-sm'
   return (
     <button
       type="button"
       {...rest}
-      className={`inline-flex items-center justify-center gap-1.5 rounded-md ${pad} transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${BUTTON_VARIANTS[variant]} ${className}`}
+      className={`inline-flex items-center justify-center gap-1.5 rounded-full ${pad} transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${BUTTON_VARIANTS[variant]} ${className}`}
     >
       {children}
     </button>
@@ -275,7 +275,9 @@ export function Toggle({
         }`}
       >
         <span
-          className={`block h-3.5 w-3.5 rounded-full bg-shell-950 transition-transform ${
+          className={`block h-3.5 w-3.5 rounded-full transition-transform ${
+            checked ? 'bg-on-accent' : 'bg-ink-300'
+          } ${
             checked ? 'translate-x-4' : 'translate-x-0.5'
           }`}
         />
@@ -297,7 +299,7 @@ export function Toggle({
 type NoticeTone = 'info' | 'warn' | 'error' | 'success'
 
 const NOTICE_TONES: Record<NoticeTone, string> = {
-  info: 'border-accent-600/50 bg-accent-600/10 text-accent-400',
+  info: 'border-shell-600 bg-shell-800 text-ink-300',
   warn: 'border-warn-600/50 bg-warn-600/10 text-warn-400',
   error: 'border-danger-600/50 bg-danger-600/10 text-danger-400',
   success: 'border-live-600/50 bg-live-600/10 text-live-400'
@@ -516,7 +518,7 @@ export function Modal({
       >
         <header className="flex shrink-0 items-start justify-between gap-4 border-b border-shell-700 px-5 py-3.5">
           <div className="min-w-0">
-            <h2 className="truncate text-sm font-semibold text-ink-100">{title}</h2>
+            <h2 className="truncate text-base font-medium text-ink-100">{title}</h2>
             {subtitle && <p className="mt-0.5 truncate text-xs text-ink-600">{subtitle}</p>}
           </div>
           <button

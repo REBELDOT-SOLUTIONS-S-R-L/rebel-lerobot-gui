@@ -35,7 +35,7 @@ export function MotorCallout({
         align === 'right' ? 'text-left' : 'text-right'
       } ${
         selected
-          ? 'border-accent-500 bg-accent-600/12'
+          ? 'border-accent-500 bg-accent-600/12 shadow-[0_0_0_1px_var(--color-accent-500)]'
           : 'border-shell-700 bg-shell-850/85 hover:border-shell-500'
       }`}
     >
