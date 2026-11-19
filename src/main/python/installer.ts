@@ -1,4 +1,5 @@
 import type { CommandSpec } from '@shared/types'
+import { LEROBOT_REQUIREMENT } from '@shared/devices'
 import { displayOf } from '../runner/commands'
 import { venvPython } from '../fs-paths'
 
@@ -60,7 +61,8 @@ export function buildInstallLerobotCommand(req: InstallRequest): CommandSpec {
     args.push('-e', `.[${extras}]`)
     return spec(python, args, req.sourcePath)
   }
-  args.push(`lerobot[${extras}]`)
+  // Pinned: a bare `lerobot[...]` installs the newest release, which the motor bridge may not support yet.
+  args.push(`lerobot[${extras}]${LEROBOT_REQUIREMENT}`)
   return spec(python, args)
 }
 
