@@ -36,6 +36,44 @@ export const FEETECH_DEFAULT_BAUDRATE = 1_000_000
 /** Highest assignable Feetech motor ID. */
 export const MAX_MOTOR_ID = 253
 
+/**
+ * The newest LeRobot minor release the motor bridge works with.
+ *
+ * LeRobot 0.7.0 moved the Feetech bus onto rustypot and dropped calls the bridge
+ * relies on (`set_timeout`, `broadcast_ping`, `get_baudrate`, the scservo
+ * `_write`). With 0.7 the CLI panels still run, but nothing that talks to the
+ * motors directly does: Configure cannot connect, and keyboard control, the
+ * motion test and auto-calibration go with it. Raise this once the bridge is
+ * ported.
+ */
+export const MAX_LEROBOT: readonly [number, number] = [0, 6]
+
+/** The pip requirement that keeps an install inside the supported releases. */
+export const LEROBOT_REQUIREMENT = `<${MAX_LEROBOT[0]}.${MAX_LEROBOT[1] + 1}`
+
+export interface LerobotSupport {
+  supported: boolean
+  /** Why not, in a sentence the Settings panel can show. */
+  reason: string | null
+}
+
+/** Whether an installed LeRobot version is one the motor bridge can drive. */
+export function lerobotSupport(version: string | null | undefined): LerobotSupport {
+  const m = /^(\d+)\.(\d+)/.exec(version ?? '')
+  if (!m) return { supported: true, reason: null } // a source checkout or an unknown build: do not guess
+  const [major, minor] = [Number(m[1]), Number(m[2])]
+  if (major > MAX_LEROBOT[0] || (major === MAX_LEROBOT[0] && minor > MAX_LEROBOT[1])) {
+    return {
+      supported: false,
+      reason:
+        `LeRobot ${version} changed the Feetech motor bus, and this app's motor functions ` +
+        `(Configure, keyboard and gamepad control, the motion test) do not work with it yet. ` +
+        `Install lerobot${LEROBOT_REQUIREMENT} instead.`
+    }
+  }
+  return { supported: true, reason: null }
+}
+
 export interface MotorIdWriteCheck {
   /** Rejected outright — forcing cannot help. */
   invalid: boolean

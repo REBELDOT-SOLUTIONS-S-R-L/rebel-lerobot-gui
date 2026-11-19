@@ -1,4 +1,4 @@
-import { PYTHON_RANGE } from '@shared/devices'
+import { PYTHON_RANGE, lerobotSupport } from '@shared/devices'
 import { DEFAULT_ROSBRIDGE_URL, ROS_TOPICS } from '@shared/ros'
 import type { InstalledPackage, PythonCandidate, RunInfo, ThemeChoice } from '@shared/types'
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
@@ -433,7 +433,13 @@ export function SettingsPanel(): ReactNode {
                 </Notice>
               )}
 
-              {caps?.ok && !caps.hasFeetech && (
+              {caps?.ok && !lerobotSupport(caps.lerobotVersion).supported && (
+                <Notice tone="warn" title="This LeRobot version is not supported yet">
+                  {lerobotSupport(caps.lerobotVersion).reason}
+                </Notice>
+              )}
+
+              {caps?.ok && !caps.hasFeetech && lerobotSupport(caps.lerobotVersion).supported && (
                 <Notice tone="warn" title="Feetech SDK missing">
                   The SO-100/SO-101 motors need it. Add the <code>feetech</code> extra and reinstall.
                 </Notice>
