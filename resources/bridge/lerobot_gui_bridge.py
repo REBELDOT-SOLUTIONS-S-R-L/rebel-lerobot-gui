@@ -150,6 +150,11 @@ AUTOCAL_HOME: list[tuple[str, str]] = [
 ]
 
 
+# How far the motion test swings wrist_roll either side of where it starts, when
+# the joint has no measured range (see start_motion_test): 512 ticks is 45 degrees.
+WRIST_ROLL_SWEEP_TICKS = 512
+
+
 def sweep_plan(name: str) -> list[tuple[str, str]]:
     return SWEEP_PLANS.get(name, [(name, "min"), (name, "max"), (name, "mid")])
 
@@ -551,6 +556,15 @@ class BusSession:
                         f"{name} still reports its full 0..{STS3215_MAX_TICK} span, so it has no "
                         "recorded range of motion. Calibrate this arm before running a motion test."
                     )
+                # LeRobot never measures wrist_roll: it stores the whole encoder
+                # span for it. The joint still has hard stops (the wiring, and the
+                # gripper body against the wrist), and nothing says where they
+                # are, so sweeping to 0 and 4095 drives the servo into one and
+                # trips its overload protection. Swing a fixed arc around where
+                # the wrist is now instead.
+                if name == "wrist_roll" and hi - lo >= STS3215_MAX_TICK:
+                    lo = max(lo, home[name] - WRIST_ROLL_SWEEP_TICKS)
+                    hi = min(hi, home[name] + WRIST_ROLL_SWEEP_TICKS)
                 limits[name] = (lo, hi)
 
         self._motion_stop = threading.Event()
