@@ -13,8 +13,8 @@ A cross-platform desktop app (Electron + React) for managing and controlling
 Built by the **[RebelDot](https://rebeldot.com) Physical AI department**. MIT licensed — clone it, use
 it, change it; keep the copyright notice, and say where it came from.
 
-- Six workflow panels: **Configure**, **3D View**, **Teleoperate**, **Replay**,
-  **Infer**, **Settings** — plus an About tab.
+- Seven workflow panels: **Configure**, **3D View**, **Teleoperate**, **Replay**,
+  **Infer**, **Demos**, **Settings** — plus an About tab.
 - Guided setup of a Python environment and a LeRobot install, with the version
   window LeRobot actually supports enforced up front.
 - An annotated arm view with live motor positions, and per-motor editing of IDs
@@ -28,14 +28,18 @@ it, change it; keep the copyright notice, and say where it came from.
   cancellable warning and a Stop button that cannot be dismissed mid-move.
 - A **3D view** of the selected follower, built in Blender from the official
   URDFs and posed live from the motor readings.
+- **Demos**: your own shell scripts saved as cards and run with one click, with
+  the selected arms' ports and ids handed to the script as environment variables.
+- **ROS 2 telemetry** through rosbridge: joint states, joint commands, the URDF
+  and motor diagnostics, with nothing ROS installed next to the app.
 - Every panel shows the exact `lerobot-*` command it will run, and streams its
   output into a real terminal — interactive prompts become buttons.
 - Light and dark themes, resizable columns, and per-panel layout that persists.
 - Runs on macOS, Windows and Linux; installers for all three build from one
   command each.
 
-It wraps the LeRobot CLI in six panels — Configure, 3D View, Teleoperate,
-Replay, Infer and Settings — so a port, device id and calibration path are
+It wraps the LeRobot CLI in seven panels — Configure, 3D View, Teleoperate,
+Replay, Infer, Demos and Settings — so a port, device id and calibration path are
 entered once and reused everywhere, instead of being retyped into ten-flag
 commands.
 
@@ -57,7 +61,11 @@ environment with LeRobot is configured. From there:
    point at an existing venv/conda env and *Use this environment*.
 3. **Install LeRobot**. The default extras are `core_scripts,feetech`:
    `core_scripts` provides record/replay/teleoperate, `feetech` is the motor SDK
-   the SO arms need.
+   the SO arms need. The install is pinned to `lerobot<0.7`. LeRobot 0.7.0 moved
+   the Feetech motor bus onto a different library, and the app's own motor
+   functions (Configure, keyboard and gamepad control, the motion test) have not
+   been ported to it yet. Settings warns if you adopt an environment that already
+   has a newer LeRobot.
 4. Check **Environment status** — it lists which `lerobot-*` commands and Python
    modules the environment actually has.
 
@@ -203,6 +211,17 @@ automatically). The panel states which path it is taking.
 
 *The Infer panel — a policy checkpoint or Hugging Face model id, the task, and the cameras the policy expects.*
 
+**Demos** — a place for everything you have already worked out at a prompt and
+want a button for. A demo is a shell script with a name, a description, a picture
+and the devices it needs. It gets a card, and the card runs the script in this
+machine's shell with the environment's scripts on `PATH`. The devices you picked
+are exported to the script, so it never has to hard-code a serial port:
+`DEMO_ROBOT_PORT`, `DEMO_ROBOT_ID`, `DEMO_ROBOT_TYPE` and
+`DEMO_ROBOT_CALIBRATION_DIR` for the first follower, the same with `DEMO_LEADER_`
+for the first leader, numbered `DEMO_DEVICE_0_*` variables for any selection, and
+`DEMO_DEVICES` with the whole list as JSON. The script's output streams into the
+same terminal pane as every other run.
+
 **Settings** — appearance, Python discovery, venv creation, LeRobot install,
 installed package list, and the default calibration/dataset folders.
 
@@ -259,6 +278,44 @@ compiled solver (`placo`) that no lerobot extra installs.
 The app probes the environment rather than assuming a LeRobot version, because
 the CLI surface has changed across releases (`lerobot-rollout` is new; the
 calibration subdirectory was renamed when the SO arms were consolidated).
+
+## ROS 2 telemetry
+
+The app can publish what it reads and writes to ROS 2 through
+[rosbridge](https://github.com/RobotWebTools/rosbridge_suite), which is JSON over
+a websocket. Nothing ROS has to be installed on the machine the app runs on.
+Start rosbridge wherever ROS 2 runs,
+
+```bash
+ros2 launch rosbridge_server rosbridge_websocket_launch.xml
+```
+
+set its address in **Settings** (the default is `ws://localhost:9090`), and turn
+on *Publish to ROS 2* in a panel that drives an arm. Topics are published under a
+namespace made from the device's name:
+
+| Topic | Type | When |
+| --- | --- | --- |
+| `/<device>/joint_states` | `sensor_msgs/JointState` | every position frame |
+| `/<device>/joint_command` | `sensor_msgs/JointState` | every goal the app writes |
+| `/<device>/robot_description` | `std_msgs/String`, latched | once, the URDF |
+| `/<device>/diagnostics` | `diagnostic_msgs/DiagnosticArray` | once a second |
+| `/<device>/session` | `std_msgs/String`, latched | JSON describing the run |
+
+Joint names are the URDF's and angles are in radians, converted the same way the
+3D view poses its model. Publishing works while the app itself drives the arm:
+the virtual arm, and keyboard or gamepad control. While a LeRobot command holds
+the serial port (a leader arm, replay on a real follower, a policy) the app has no
+readings to publish. The app does not subscribe to commands.
+
+## How it relates to LeLab
+
+Hugging Face publishes its own GUI, [LeLab](https://github.com/huggingface/leLab),
+a web app that covers calibration, leader-arm teleoperation, recording, training
+and inference. This app has no training panel. It is a desktop app that leans
+toward the bench: live motor readings, motor IDs and limits, the motion test,
+auto-calibration, keyboard and gamepad control without a leader arm, the virtual
+arm, ROS 2 telemetry, and the SO-100 alongside the SO-101.
 
 ## Development
 
