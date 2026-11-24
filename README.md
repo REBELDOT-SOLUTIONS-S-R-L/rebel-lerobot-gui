@@ -377,7 +377,8 @@ and Windows installers want their own toolchains. `npm install` runs
 So use one machine per platform, or the included GitHub Actions workflow
 ([.github/workflows/build.yml](.github/workflows/build.yml)) which runs the test
 suite and builds installers on `macos-latest`, `windows-latest` and
-`ubuntu-latest`, then uploads them as artifacts. Trigger it from the Actions tab
+`ubuntu-22.04` (the oldest image, so the Linux installers also run on Ubuntu
+22.04 and 24.04), then uploads them as artifacts. Trigger it from the Actions tab
 or push a `v*` tag. A tag also creates a draft GitHub Release with the installers
 attached, for a maintainer to review and publish. It builds without
 certificates; the workflow comments say which secrets to add to change that. The macOS build is
