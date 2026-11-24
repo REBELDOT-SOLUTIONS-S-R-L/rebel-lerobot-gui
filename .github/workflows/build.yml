@@ -29,7 +29,12 @@ jobs:
           - os: windows-latest
             target: dist:win
             python: python.exe
-          - os: ubuntu-latest
+          # Not ubuntu-latest: node-pty is compiled on the runner, and the result
+          # needs at least the runner's glibc. Built on Ubuntu 26.04 it asked for
+          # GLIBC_2.42 and failed to load on Ubuntu 24.04 and 22.04, so the
+          # installed app had no pty. The oldest image keeps the installers
+          # usable on 22.04 and everything newer.
+          - os: ubuntu-22.04
             target: dist:linux
             python: python3
     runs-on: ${{ matrix.os }}
@@ -53,12 +58,13 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y xvfb
 
-      # Ubuntu 24.04 runners restrict unprivileged user namespaces. Chromium then
+      # Ubuntu 24.04 and newer restrict unprivileged user namespaces. Chromium then
       # falls back to its setuid sandbox helper, which is not root-owned in
       # node_modules, and Electron aborts at start. Lift the restriction instead.
+      # Ubuntu 22.04 has no such setting, hence `|| true`.
       - name: Let Electron's sandbox start
         if: runner.os == 'Linux'
-        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
 
       # `postinstall` rebuilds node-pty against this runner's Electron.
       - run: npm ci
@@ -87,6 +93,19 @@ jobs:
         run: npm run ${{ matrix.target }}
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      # Guard for the choice of Linux runner above: fail the build if the pty
+      # module would not load on Ubuntu 22.04 (glibc 2.35).
+      - name: Check the glibc the Linux build needs
+        if: runner.os == 'Linux'
+        run: |
+          pty=dist/linux-unpacked/resources/app.asar.unpacked/node_modules/node-pty/build/Release/pty.node
+          need=$(objdump -T "$pty" | grep -o 'GLIBC_[0-9.]*' | sort -V | tail -1)
+          echo "pty.node needs $need"
+          if [ "$(printf '%s\n' "$need" GLIBC_2.35 | sort -V | tail -1)" != "GLIBC_2.35" ]; then
+            echo "::error::pty.node needs $need, which Ubuntu 22.04 (GLIBC_2.35) does not have"
+            exit 1
+          fi
 
       - uses: actions/upload-artifact@v4
         with:
