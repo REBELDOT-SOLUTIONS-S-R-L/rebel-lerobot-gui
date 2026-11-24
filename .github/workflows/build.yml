@@ -5,7 +5,9 @@
 # installers want their own toolchains. So each platform builds on its own
 # runner, which is also the only way to get a signed macOS build later.
 #
-# Run it from the Actions tab, or push a v* tag to attach the artifacts.
+# Run it from the Actions tab to get the installers as artifacts of the run. Push a
+# v* tag to also get a draft GitHub Release with the installers attached; a
+# maintainer reviews the draft and publishes it.
 name: build
 
 on:
@@ -21,10 +23,15 @@ jobs:
         include:
           - os: macos-latest
             target: dist:mac
+            python: python3
+          # node-pty looks the program up on PATH by its exact file name, so on
+          # Windows the smoke test has to be told `python.exe`.
           - os: windows-latest
             target: dist:win
+            python: python.exe
           - os: ubuntu-latest
             target: dist:linux
+            python: python3
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -35,10 +42,23 @@ jobs:
           node-version: 22
           cache: npm
 
+      # The smoke test drives a stand-in for `lerobot-calibrate` through a pty,
+      # which needs some Python on PATH.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
       # Electron needs a display to open a window, which `npm run smoke` does.
       - name: Install Xvfb
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y xvfb
+
+      # Ubuntu 24.04 runners restrict unprivileged user namespaces. Chromium then
+      # falls back to its setuid sandbox helper, which is not root-owned in
+      # node_modules, and Electron aborts at start. Lift the restriction instead.
+      - name: Let Electron's sandbox start
+        if: runner.os == 'Linux'
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
       # `postinstall` rebuilds node-pty against this runner's Electron.
       - run: npm ci
@@ -46,14 +66,21 @@ jobs:
       - name: Verify
         run: npm run verify
         if: runner.os != 'Linux'
+        env:
+          SMOKE_PYTHON: ${{ matrix.python }}
 
       - name: Verify (Linux)
         run: xvfb-run -a npm run verify
         if: runner.os == 'Linux'
+        env:
+          SMOKE_PYTHON: ${{ matrix.python }}
 
       # Unsigned builds. To sign, add the secrets electron-builder documents
       # (CSC_LINK / CSC_KEY_PASSWORD, and APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD
       # / APPLE_TEAM_ID for notarization) and drop this env block.
+      # The dist scripts pass `--publish never`: on CI electron-builder would
+      # otherwise try to publish by itself and fail for lack of a token. The
+      # release job below does the publishing.
       - name: Package
         run: npm run ${{ matrix.target }}
         env:
@@ -69,3 +96,27 @@ jobs:
             dist/*.AppImage
             dist/*.deb
           if-no-files-found: error
+
+  # For a v* tag only: collect the installers from all three builds and attach
+  # them to a draft release. It runs only if every platform built.
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: installers
+          merge-multiple: true
+
+      - name: Create the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create "$GITHUB_REF_NAME" installers/*
+          --repo "$GITHUB_REPOSITORY"
+          --title "$GITHUB_REF_NAME"
+          --generate-notes
+          --draft

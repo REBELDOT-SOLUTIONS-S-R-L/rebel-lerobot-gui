@@ -373,8 +373,10 @@ So use one machine per platform, or the included GitHub Actions workflow
 ([.github/workflows/build.yml](.github/workflows/build.yml)) which runs the test
 suite and builds installers on `macos-latest`, `windows-latest` and
 `ubuntu-latest`, then uploads them as artifacts. Trigger it from the Actions tab
-or push a `v*` tag. It builds unsigned; the workflow comments say which secrets
-to add to change that.
+or push a `v*` tag. A tag also creates a draft GitHub Release with the installers
+attached, for a maintainer to review and publish. It builds unsigned; the
+workflow comments say which secrets to add to change that. The macOS build is
+for Apple Silicon only.
 
 If you would rather not use CI, electron-builder can sometimes reach across:
 Windows targets build on macOS/Linux with [Wine](https://www.winehq.org)
