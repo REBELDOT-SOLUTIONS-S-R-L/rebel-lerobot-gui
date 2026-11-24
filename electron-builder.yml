@@ -84,3 +84,25 @@ linux:
   # `deb` refuses to build without a maintainer.
   maintainer: RebelDot <andrei.brumboiu@rebeldot.com>
   synopsis: GUI for setting up and operating LeRobot SO-100 / SO-101 arms
+
+deb:
+  # Setting `depends` replaces electron-builder's own list, so the first nine
+  # entries repeat that list. The last two are libraries the Electron binary
+  # links to that the list leaves out. A desktop install has them already. A
+  # bare one (a container, a server image) does not, and there the app failed
+  # to start with "libgbm.so.1: cannot open shared object file".
+  # libasound2 carries a version because Ubuntu 24.04 renamed the package to
+  # libasound2t64, and a second, unrelated package also claims the old name.
+  # Only libasound2t64 claims it with a version, so only it satisfies this.
+  depends:
+    - libgtk-3-0
+    - libnotify4
+    - libnss3
+    - libxss1
+    - libxtst6
+    - xdg-utils
+    - libatspi2.0-0
+    - libuuid1
+    - libsecret-1-0
+    - libgbm1
+    - libasound2 (>= 1.0.17)
