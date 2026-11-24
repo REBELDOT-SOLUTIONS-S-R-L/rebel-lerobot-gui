@@ -107,6 +107,26 @@ jobs:
             exit 1
           fi
 
+      # Guard for `deb.depends` in electron-builder.yml: install the package on a
+      # bare Ubuntu 22.04, where nothing is there by accident, and fail the build
+      # if the app's binary still lacks a shared library.
+      - name: Check the .deb brings every library it needs
+        if: runner.os == 'Linux'
+        run: |
+          docker run --rm -v "$PWD/dist":/dist:ro ubuntu:22.04 bash -c '
+            set -e
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update -qq
+            cp /dist/*.deb /tmp/
+            apt-get install -y -qq /tmp/*.deb > /dev/null
+            missing=$(ldd "/opt/LeRobot Control/rebel-lerobot-gui" | grep "not found" | tr -s "\t\n" "  " || true)
+            if [ -n "$missing" ]; then
+              echo "::error::the installed app lacks:$missing"
+              exit 1
+            fi
+            echo "the installed app has every shared library it links to"
+          '
+
       - uses: actions/upload-artifact@v4
         with:
           name: installers-${{ matrix.os }}
