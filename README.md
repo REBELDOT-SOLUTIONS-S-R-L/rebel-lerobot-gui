@@ -10,6 +10,11 @@
 A cross-platform desktop app (Electron + React) for managing and controlling
 [LeRobot](https://github.com/huggingface/lerobot) SO-100 / SO-101 arms.
 
+https://github.com/user-attachments/assets/022367d5-7fd6-4bf8-a1ea-2c7b93becb26
+
+*The app on a real SO-101 follower, in 53 seconds: live motor readings and the
+motion test, keyboard control, replay of a dataset episode, and the virtual arm.*
+
 Built by the **[RebelDot](https://rebeldot.com) Physical AI department**. MIT licensed — clone it, use
 it, change it; keep the copyright notice, and say where it came from.
 
