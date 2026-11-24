@@ -48,7 +48,21 @@ Replay, Infer, Demos and Settings — so a port, device id and calibration path 
 entered once and reused everywhere, instead of being retyped into ten-flag
 commands.
 
+## Download
+
+Installers for macOS (Apple Silicon), Windows and Linux are on the
+[Releases](https://github.com/REBELDOT-SOLUTIONS-S-R-L/rebel-lerobot-gui/releases/latest)
+page. They are not signed with a developer certificate, so macOS and Windows
+warn on first launch; [Signing](#signing) says how to get past that. On Ubuntu
+and Debian, use the `.deb`.
+
+The installer does not include Python or LeRobot. On first launch the app opens
+Settings and sets both up, as described from step 1 below. The virtual arm works
+before any of that.
+
 ## Quick start
+
+To run from source instead of an installer:
 
 ```bash
 npm install          # also rebuilds node-pty for Electron
