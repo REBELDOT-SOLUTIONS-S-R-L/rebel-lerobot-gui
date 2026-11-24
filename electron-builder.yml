@@ -52,9 +52,20 @@ extraResources:
 mac:
   target: [dmg, zip]
   category: public.app-category.developer-tools
-  # Unsigned builds work for local use; macOS will warn on first launch. Set
-  # CSC_IDENTITY_AUTO_DISCOVERY=false to skip signing deliberately, or provide
-  # CSC_LINK / CSC_KEY_PASSWORD to sign. See README.md.
+  # No Developer ID certificate is configured, so the app is signed ad hoc
+  # ("-"). Without any signature the bundle keeps Electron's own linker
+  # signature, which no longer matches the packaged contents: `codesign --verify`
+  # fails, and on Apple Silicon a downloaded copy is reported as damaged, with no
+  # way to open it from the UI. An ad-hoc signature is valid, so macOS shows its
+  # usual warning for apps from unidentified developers instead. See README.md.
+  #
+  # The hardened runtime is off because, signed ad hoc, it would refuse to load
+  # the app's own frameworks (library validation needs a team identity).
+  #
+  # To sign with a real certificate: remove `identity` and `hardenedRuntime`
+  # here and provide CSC_LINK / CSC_KEY_PASSWORD.
+  identity: '-'
+  hardenedRuntime: false
   extendInfo:
     NSCameraUsageDescription: LeRobot Control lists and previews connected cameras so you can pick one for teleoperation and recording.
     NSMicrophoneUsageDescription: Not used. Present only because camera capture APIs may request it.

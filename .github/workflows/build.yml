@@ -75,9 +75,11 @@ jobs:
         env:
           SMOKE_PYTHON: ${{ matrix.python }}
 
-      # Unsigned builds. To sign, add the secrets electron-builder documents
+      # No certificates: Windows is unsigned and macOS is signed ad hoc (see
+      # electron-builder.yml). To sign, add the secrets electron-builder documents
       # (CSC_LINK / CSC_KEY_PASSWORD, and APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD
-      # / APPLE_TEAM_ID for notarization) and drop this env block.
+      # / APPLE_TEAM_ID for notarization), drop this env block, and remove
+      # `identity` and `hardenedRuntime` from electron-builder.yml.
       # The dist scripts pass `--publish never`: on CI electron-builder would
       # otherwise try to publish by itself and fail for lack of a token. The
       # release job below does the publishing.

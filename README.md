@@ -374,8 +374,8 @@ So use one machine per platform, or the included GitHub Actions workflow
 suite and builds installers on `macos-latest`, `windows-latest` and
 `ubuntu-latest`, then uploads them as artifacts. Trigger it from the Actions tab
 or push a `v*` tag. A tag also creates a draft GitHub Release with the installers
-attached, for a maintainer to review and publish. It builds unsigned; the
-workflow comments say which secrets to add to change that. The macOS build is
+attached, for a maintainer to review and publish. It builds without
+certificates; the workflow comments say which secrets to add to change that. The macOS build is
 for Apple Silicon only.
 
 If you would rather not use CI, electron-builder can sometimes reach across:
@@ -395,10 +395,13 @@ release path.
 
 ### Signing
 
-Unsigned builds work, and are what you get by default:
+Builds without a certificate work, and are what you get by default:
 
-- **macOS** — Gatekeeper will refuse the first launch; right-click → *Open*, or
+- **macOS** — the app is signed ad hoc, so Gatekeeper blocks the first launch of
+  a downloaded copy. Open *System Settings → Privacy & Security* and press
+  *Open Anyway*, or run
   `xattr -dr com.apple.quarantine "/Applications/LeRobot Control.app"`. To sign,
+  remove `identity` and `hardenedRuntime` from `electron-builder.yml` and
   set `CSC_LINK` and `CSC_KEY_PASSWORD` to a Developer ID certificate; to
   notarize as well, add `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD` and
   `APPLE_TEAM_ID` and set `mac.notarize: true`. Set
