@@ -232,14 +232,63 @@ automatically). The panel states which path it is taking.
 
 **Demos** — a place for everything you have already worked out at a prompt and
 want a button for. A demo is a shell script with a name, a description, a picture
-and the devices it needs. It gets a card, and the card runs the script in this
-machine's shell with the environment's scripts on `PATH`. The devices you picked
-are exported to the script, so it never has to hard-code a serial port:
-`DEMO_ROBOT_PORT`, `DEMO_ROBOT_ID`, `DEMO_ROBOT_TYPE` and
-`DEMO_ROBOT_CALIBRATION_DIR` for the first follower, the same with `DEMO_LEADER_`
-for the first leader, numbered `DEMO_DEVICE_0_*` variables for any selection, and
-`DEMO_DEVICES` with the whole list as JSON. The script's output streams into the
-same terminal pane as every other run.
+and the devices it needs. Each one gets a card on the grid, showing its
+thumbnail, description, devices and whether it is running; the last card adds a
+new one.
+
+![The Demos panel](assets/screenshots/Screenshot7_demo.png)
+
+*The Demos panel — one card per saved script, with its thumbnail, description and devices.*
+
+The edit dialog holds the name (up to 60 characters, unique across demos), the
+devices to hand the script, the script itself, a one- or two-line description
+for the card, and a thumbnail. The image is copied into the app's own data
+folder, so the card keeps it after the original is moved or deleted. A demo can
+be deleted from the same dialog. Devices are optional: a script that only calls
+`lerobot-*` commands with fixed flags is a perfectly good demo.
+
+![Editing a demo](assets/screenshots/Screenshot7_demo_edit.png)
+
+*Editing a demo — name, devices, script, description and thumbnail.*
+
+The devices you pick are exported to the script, so it never has to hard-code a
+serial port that changes between machines:
+
+- `DEMO_ROBOT_PORT`, `DEMO_ROBOT_ID`, `DEMO_ROBOT_TYPE`, `DEMO_ROBOT_MODEL` and
+  `DEMO_ROBOT_CALIBRATION_DIR` for the first follower, and the same with
+  `DEMO_LEADER_` for the first leader.
+- `DEMO_DEVICE_0_*`, `DEMO_DEVICE_1_*` and so on for every device picked, in
+  order, with `DEMO_DEVICE_COUNT` saying how many.
+- `DEMO_DEVICES` with the whole list as JSON, and `DEMO_NAME` / `DEMO_UID` for
+  the demo itself.
+
+A device that was picked and has since been deleted is left out rather than
+exported empty, and the card flags it. So a teleoperation demo can be as short
+as:
+
+```bash
+lerobot-teleoperate \
+  --robot.type="$DEMO_ROBOT_TYPE" --robot.port="$DEMO_ROBOT_PORT" --robot.id="$DEMO_ROBOT_ID" \
+  --teleop.type="$DEMO_LEADER_TYPE" --teleop.port="$DEMO_LEADER_PORT" --teleop.id="$DEMO_LEADER_ID"
+```
+
+Clicking a card opens its run dialog. The script is written to a file and run by
+this machine's own shell: your login shell on macOS and Linux, PowerShell on
+Windows. The configured environment's scripts are first on `PATH`, so
+`lerobot-*` commands resolve without a full path. The app adds `set -e` (or
+`$ErrorActionPreference = "Stop"` in PowerShell) in front of the script, so a
+demo whose first command fails is reported as failed instead of running on and
+exiting cleanly.
+
+![Running a demo](assets/screenshots/Screenshot7_demo_output.png)
+
+*Running a demo — its status, the devices it was given, and the script's live output.*
+
+The output streams into a real terminal, so a script that prompts can be
+answered by typing into it, and the log can be copied or cleared. **Stop** sends
+`SIGINT`, as everywhere else in the app, and **Restart** waits for the script to
+exit before starting it again. Closing the dialog leaves the demo running, and
+its card keeps showing the status.
 
 **Settings** — appearance, Python discovery, venv creation, LeRobot install,
 installed package list, and the default calibration/dataset folders.
