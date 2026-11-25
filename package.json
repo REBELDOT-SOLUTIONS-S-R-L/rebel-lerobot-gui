@@ -1,6 +1,6 @@
 {
   "name": "rebel-lerobot-gui",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Desktop GUI for setting up and operating LeRobot SO-100 / SO-101 arms",
   "author": {
